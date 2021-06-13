@@ -60,6 +60,7 @@ elseif( DEFINED ENV{AMENT_PREFIX_PATH})
     message(STATUS "COMPILING_WITH_CATKIN")
     add_definitions(-DCOMPILED_WITH_AMENT)
 
+    find_package(ament_cmake REQUIRED)
     find_package(plotjuggler REQUIRED)
     set(PJ_PLUGIN_INSTALL_DIRECTORY lib/${PROJECT_NAME} )
 
@@ -79,6 +80,7 @@ endif()
 #------- Create the libraries -------
 
 add_library(PlotJugglerStreamSample SHARED
+    DataStreamSample/datastream_sample.h
     DataStreamSample/datastream_sample.cpp )
 
 target_link_libraries(PlotJugglerStreamSample
@@ -86,11 +88,16 @@ target_link_libraries(PlotJugglerStreamSample
 
 
 add_library(PlotJugglerDataSample SHARED
+   DataLoadSampleCSV/dataload_simple_csv.h
    DataLoadSampleCSV/dataload_simple_csv.cpp )
 
 target_link_libraries(PlotJugglerDataSample
     ${PJ_LIBRARIES})
 
+if (COMPILING_WITH_AMENT)
+    ament_target_dependencies(PlotJugglerStreamSample plotjuggler)
+    ament_target_dependencies(PlotJugglerDataSample plotjuggler)
+endif()
 #------- Install the libraries -------
 
 install(
