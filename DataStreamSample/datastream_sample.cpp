@@ -32,18 +32,14 @@ DataStreamSample::DataStreamSample()
 
     //------------
     // Demonstrate how to use Groups and properties
-    auto& tc_default = dataMap().addNumeric("tc/blue")->second;
-    auto& tc_red = dataMap().addNumeric("tc/red")->second;
-
-    // create a PlotGroup
     auto tcGroup = std::make_shared<PJ::PlotGroup>("tc");
-    tc_default.setGroup( tcGroup );
-    tc_red.setGroup( tcGroup );
+
+    auto& tc_default = dataMap().addNumeric("tc/blue", tcGroup)->second;
+    auto& tc_red = dataMap().addNumeric("tc/red", tcGroup)->second;
 
     tcGroup->setAttribute("text_color", QColor(Qt::blue) );
     // Series "text_color" property has a priority over the group color
     tc_red.setAttribute("text_color", QColor(Qt::red) );
-
 }
 
 bool DataStreamSample::start(QStringList*)
