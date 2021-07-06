@@ -1,15 +1,15 @@
 <?xml version="1.0"?>
 <package format="3">
-    <name>plotjuggler_sample_plugins</name>
+    <name>plotjuggler_apbin_plugins</name>
     <version>0.1.0</version>
-    <description>PlotJuggler sample plugins</description>
+    <description>PlotJuggler ArduPilot Bin plugins</description>
 
-    <maintainer email="davide.faconti@gmail.com">Davide Faconti</maintainer>
+    <maintainer email="pierre.kancir.emn@gmail.com">Pierre KANCIR</maintainer>
     <license>LGPLv3</license>
 
-    <url type="website">https://github.com/PlotJuggler/plotjuggler-sample-plugins</url>
+    <url type="website">https://github.com/PlotJuggler/plotjuggler-apbin-plugins</url>
 
-    <author email="davide.faconti@gmail.com">Davide Faconti</author>
+    <author email="pierre.kancir.emn@gmail.com">Pierre KANCIR</author>
 
     <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
     <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.7)
 
-project(plotjuggler_sample_plugins)
+project(plotjuggler_apbin_plugins)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -79,31 +79,22 @@ endif()
 
 #------- Create the libraries -------
 
-add_library(PlotJugglerStreamSample SHARED
-    DataStreamSample/datastream_sample.h
-    DataStreamSample/datastream_sample.cpp )
+add_library(DataAPBin SHARED
+    DataLoadAPBin/dataload_apbin.cpp
+    DataLoadAPBin/dataload_apbin.h
+    )
 
-target_link_libraries(PlotJugglerStreamSample
-    ${PJ_LIBRARIES})
-
-
-add_library(PlotJugglerDataSample SHARED
-   DataLoadSampleCSV/dataload_simple_csv.h
-   DataLoadSampleCSV/dataload_simple_csv.cpp )
-
-target_link_libraries(PlotJugglerDataSample
+target_link_libraries(DataAPBin
     ${PJ_LIBRARIES})
 
 if (COMPILING_WITH_AMENT)
-    ament_target_dependencies(PlotJugglerStreamSample plotjuggler)
-    ament_target_dependencies(PlotJugglerDataSample plotjuggler)
+    ament_target_dependencies(DataAPBin plotjuggler)
 endif()
 #------- Install the libraries -------
 
 install(
     TARGETS
-        PlotJugglerStreamSample
-        PlotJugglerDataSample
+        DataAPBin
     DESTINATION
         ${PJ_PLUGIN_INSTALL_DIRECTORY}  )
 

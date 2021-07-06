@@ -1,9 +1,7 @@
-# plotjuggler-sample-plugins
+# plotjuggler-apbin-plugins
 
-This repository contains some basic examples of
-[PlotJuggler](https://github.com/facontidavide/PlotJuggler) plugins.
+This repository contains [ArduPilot Dataflash](https://ardupilot.org/copter/docs/common-logs.html) plugin for Plotjuggler.
 
-You may use them as a template to create your own plugins.
 
 ## Build
 
