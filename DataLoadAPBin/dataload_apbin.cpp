@@ -83,9 +83,33 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     }
     // get the full log format from the message type
     const struct log_Format& format = formats[type];
+    
     // discard some messages that aren't numbers : PARAM (64), MSG (91), UNITS (177), MULTI (178)
     // remove unknown format
-    if (format.type == 64 || format.type == 91 || format.type == 177 || format.type == 178 || format.length == 0)
+    // type id is not consistent through AP versions, so we have to check full name instead of ID
+
+    if ( memcmp(format.name, "PARM", 4) == 0)
+    {
+      total_bytes_used += 1;
+      continue;
+    }
+    if ( memcmp(format.name, "MSG", 3) == 0)
+    {
+      total_bytes_used += 1;
+      continue;
+    }
+    if ( memcmp(format.name, "UNIT", 4) == 0)
+    {
+      total_bytes_used += 1;
+      continue;
+    }
+    if ( memcmp(format.name, "MULT", 4) == 0)
+    {
+      total_bytes_used += 1;
+      continue;
+    }
+
+    if (format.length == 0)
     {
       total_bytes_used += 1;
       continue;
