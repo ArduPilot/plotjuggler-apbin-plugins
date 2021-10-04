@@ -28,6 +28,7 @@ else()
     set(_LIBSUFFIXES /lib)
 endif()
 
+# For old plotjuggler releases (up to version 3.2)
 find_library(PlotJuggler_LIBRARY
     NAMES
     plotjuggler_plugin_base
@@ -36,6 +37,17 @@ find_library(PlotJuggler_LIBRARY
     PATH_SUFFIXES
     "${_LIBSUFFIXES}")
 
+# For new plotjuggler releases (from version 3.3)
+if(NOT PlotJuggler_LIBRARY)
+    find_library(PlotJuggler_LIBRARY
+        NAMES
+        plotjuggler_base
+        PATHS
+        "${PlotJuggler_ROOT_DIR}"
+        PATH_SUFFIXES
+        "${_LIBSUFFIXES}")
+endif()
+    
 # Might want to look close to the library first for the includes.
 get_filename_component(_libdir "${PlotJuggler_LIBRARY}" PATH)
 
