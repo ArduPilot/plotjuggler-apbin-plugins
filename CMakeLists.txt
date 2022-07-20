@@ -5,11 +5,6 @@ project(plotjuggler_apbin_plugins)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_MODULE_PATH
-    ${CMAKE_MODULE_PATH}
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
-    )
-
 #-------  Include Qt dependencies -------
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
@@ -19,7 +14,7 @@ find_package(Qt5 REQUIRED COMPONENTS
     Core
     Widgets
     Xml
-    Svg )
+    Svg)
 
 include_directories(
     ${Qt5Core_INCLUDE_DIRS}
@@ -68,21 +63,21 @@ elseif( DEFINED ENV{AMENT_PREFIX_PATH})
     #------------- Build without any ROS support ------------
 else()
 
-    find_package(PlotJuggler REQUIRED)
+    find_package(plotjuggler REQUIRED)
     message(STATUS "PlotJuggler FOUND")
+    message(STATUS "plotjuggler_INCLUDE_DIR: ${plotjuggler_INCLUDE_DIR}")
+    message(STATUS "plotjuggler_LIBRARIES: ${plotjuggler_LIBRARIES}")
 
-    include_directories(${PlotJuggler_INCLUDE_DIRS})
-    list(APPEND ${PJ_LIBRARIES} ${PlotJuggler_LIBRARIES} )
+    include_directories(${plotjuggler_INCLUDE_DIR})
+    list(APPEND PJ_LIBRARIES ${plotjuggler_LIBRARIES} )
     set(PJ_PLUGIN_INSTALL_DIRECTORY bin )
 
 endif()
 
 #------- Create the libraries -------
-
 add_library(DataAPBin SHARED
-    DataLoadAPBin/dataload_apbin.cpp
     DataLoadAPBin/dataload_apbin.h
-    )
+    DataLoadAPBin/dataload_apbin.cpp )
 
 target_link_libraries(DataAPBin
     ${PJ_LIBRARIES})
@@ -90,11 +85,10 @@ target_link_libraries(DataAPBin
 if (COMPILING_WITH_AMENT)
     ament_target_dependencies(DataAPBin plotjuggler)
 endif()
-#------- Install the libraries -------
 
+#------- Install the libraries -------
 install(
     TARGETS
         DataAPBin
     DESTINATION
         ${PJ_PLUGIN_INSTALL_DIRECTORY}  )
-
