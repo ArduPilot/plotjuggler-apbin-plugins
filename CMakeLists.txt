@@ -19,7 +19,9 @@ find_package(Qt5 REQUIRED COMPONENTS
     Core
     Widgets
     Xml
-    Svg )
+    Svg
+    Concurrent
+    )
 
 include_directories(
     ${Qt5Core_INCLUDE_DIRS}
@@ -31,7 +33,8 @@ set(QT_LIBRARIES
     Qt5::Core
     Qt5::Widgets
     Qt5::Xml
-    Qt5::Svg )
+    Qt5::Svg
+    Qt5::Concurrent)
 
 add_definitions( ${QT_DEFINITIONS} -DQT_PLUGIN )
 set( PJ_LIBRARIES ${QT_LIBRARIES} )
