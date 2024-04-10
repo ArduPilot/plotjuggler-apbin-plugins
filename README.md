@@ -1,43 +1,50 @@
 # plotjuggler-apbin-plugins
 
-This repository contains [ArduPilot Dataflash](https://ardupilot.org/copter/docs/common-logs.html) plugin for Plotjuggler.
+This repository contains [ArduPilot Dataflash](https://ardupilot.org/copter/docs/common-logs.html) plugin for [PlotJuggler](https://github.com/facontidavide/PlotJuggler).
 
 
-## Build
+## Install PlotJuggler
 
-To build any plugin, PlotJuggler must be installed in your system.
+To build any plugin for PlotJuggler, PlotJuggler must be installed on your system.
+For detailled instructions on how to install PlotJuggler please have a look at the [Installation](https://github.com/facontidavide/PlotJuggler#installation) section of the PlotJuggler repository.
 
-For instance, in Linux, you should perform a full compilation and installation:
+If you have ROS installed, you can install PlotJuggler using:
 
-```
-git clone --recurse-submodules https://github.com/facontidavide/PlotJuggler.git
-cd PlotJuggler
-mkdir build; cd build
-cmake ..
-make -j
-sudo make install
-```
+    sudo apt install ros-$ROS_DISTRO-plotjuggler-ros
 
-Look at the [CMakeLists.txt](CMakeLists.txt) file to learn how to
-find **Qt** and PlotJuggler.
 
-## Plugin installation
+## Install plotjuggler-apbin-plugin
+The installation of the plotjuggler-apbin-plugin is straightforward.
 
-Remember that PlotJugglers need to find the plugin files at startup.
+1. Clone the repository:
 
-The best way to do that is to install/copy the plugin in the same folder
-where the executable `plotjuggler`is located.
+    ```
+    git clone https://github.com/khancyr/plotjuggler-apbin-plugins
+    ```
+    
+2. Install the dependencies:  
+    The plugin uses Qt as dependency. Since PlotJuggler also depends on Qt, chances are high that you already have it installed. On Ubuntu Qt can be installed with:
 
-Alternatively, there is a number of additional folders which will be
-used to load plugins. Check **App->Preferences...** in PlotJuggler to learn more.
+    ```
+    sudo apt -y install qtbase5-dev libqt5svg5-dev
+    ```
 
-## Note for ROS users
+3. Compile using cmake:
 
-The provide **CMakeLists.txt** should find the necessary dependencies even
-when compiled with `catkin` or `ament`.
+    ```
+    mkdir build; cd build
+    cmake ..
+    make
+    sudo make install
+    ```
 
-Anyway, remember that the primary goal of this repo is **not** to
-support the development of ROS specific plugins.
+If you run `sudo make install` the plugin gets installed to `/usr/local/bin/`.  
+Remember that PlotJuggler needs to find the plugin files at startup. Therefore make sure that the folder containing the plugin files is added to PlotJuggler in the settings.
+Check **App->Preferences->Plugins** in PlotJuggler to learn more.
 
-You can find those in the repository
-[PlotJuggler/plotjuggler-ros-plugins](https://github.com/PlotJuggler/plotjuggler-ros-plugins)
+
+## Configuration
+If you want the units to be displayed in PlotJuggler, you need to edit `dataload_apbin.cpp` and activate `#define LABEL_WITH_UNIT`.  
+**Be carefull:**  
+This is not a nice solution because the units are simply appended to the field names.
+This renders your already created visualization layouts unusable. It would be a better solution if PlotJuggler supported unit handling directly.
