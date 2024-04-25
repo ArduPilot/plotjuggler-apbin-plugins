@@ -1,0 +1,28 @@
+name: CI/CD
+
+on: [push, pull_request]
+
+jobs:
+  compile:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+
+    - name: Install dependencies
+      run: |
+        choco install -y make gcc gcc-c++ qt5-win64-vs2017
+
+    - name: Setup CMake
+      uses: actions/setup-cmake@v1
+      with:
+        cmake-version: '3.16.4'
+
+    - name: Compile
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        cmake --build .
+        cmake --install .
