@@ -31,6 +31,13 @@ set(QT_LIBRARIES
 add_definitions( ${QT_DEFINITIONS} -DQT_PLUGIN )
 set( PJ_LIBRARIES ${QT_LIBRARIES} )
 
+#-------------- Switch units support ----------------
+OPTION(ADD_UNITS "Add units support" OFF)
+IF(ADD_UNITS)
+    add_compile_definitions("LABEL_WITH_UNIT")
+    message(STATUS "Enabling field units define.")
+ENDIF(ADD_UNITS)
+
 #--------------------------------------------------------
 #-------------- Build with CATKIN (ROS1) ----------------
 if( CATKIN_DEVEL_PREFIX OR catkin_FOUND OR CATKIN_BUILD_BINARY_PACKAGE)
