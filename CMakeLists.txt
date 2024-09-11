@@ -12,6 +12,7 @@ SET(CMAKE_AUTOUIC ON)
 
 find_package(Qt5 REQUIRED COMPONENTS
     Core
+    Concurrent
     Widgets
     Xml
     Svg)
@@ -24,6 +25,7 @@ include_directories(
 
 set(QT_LIBRARIES
     Qt5::Core
+    Qt5::Concurrent
     Qt5::Widgets
     Qt5::Xml
     Qt5::Svg )
@@ -59,7 +61,7 @@ if( CATKIN_DEVEL_PREFIX OR catkin_FOUND OR CATKIN_BUILD_BINARY_PACKAGE)
 elseif( DEFINED ENV{AMENT_PREFIX_PATH})
 
     set(COMPILING_WITH_AMENT 1)
-    message(STATUS "COMPILING_WITH_CATKIN")
+    message(STATUS "COMPILING_WITH_AMENT")
     add_definitions(-DCOMPILED_WITH_AMENT)
 
     find_package(ament_cmake REQUIRED)
