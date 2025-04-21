@@ -9,9 +9,9 @@ This repository contains the [ArduPilot Dataflash](https://ardupilot.org/copter/
 To build any plugin for PlotJuggler, PlotJuggler must be installed on your system.
 For detailed instructions on how to install PlotJuggler please have a look at the [Installation](https://github.com/facontidavide/PlotJuggler#installation) section of the PlotJuggler repository.
 
-If you have ROS installed, you can install PlotJuggler using:
+If you have ROS installed and use rosdep, you can install dependencies automatically:
 
-    sudo apt install ros-$ROS_DISTRO-plotjuggler-ros
+    rosdep install --from-paths . --ignore-src
 
 ## (Optional) Build plotjuggler-apbin-plugin
 
@@ -59,13 +59,12 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
 
 2. If you want the units to be displayed in PlotJuggler (read at the end), you need to edit `dataload_apbin.cpp` and activate `#define LABEL_WITH_UNIT`.  
 
-3. Compile using cmake:
+3. Compile and install using CMake:
 
     ```
-    mkdir build; cd build
-    cmake ..
-    make
-    sudo make install
+    cmake -B build
+    cmake --build build
+    sudo cmake --install build
     ```
 
 ## Install plotjuggler-apbin-plugin
