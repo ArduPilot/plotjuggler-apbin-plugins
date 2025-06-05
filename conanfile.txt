@@ -1,0 +1,12 @@
+ [requires]
+ protobuf/3.21.12
+ mosquitto/2.0.18
+ zeromq/4.3.5
+ zlib/1.2.13
+
+ [options]
+ zeromq*:shared=False
+
+ [generators]
+ CMakeDeps
+ CMakeToolchain
