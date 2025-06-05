@@ -1,0 +1,66 @@
+name: Build PlotJuggler & Plugin
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout plugin
+      uses: actions/checkout@v4
+
+    - name: Install Conan
+      uses: turtlebrowser/get-conan@main
+
+    - name: Install Qt (se serve)
+      uses: jurplel/install-qt-action@v4
+      with:
+        version: '5.15.2'
+        arch: 'win64_msvc2019_64'
+
+    # (Facoltativo, se usi la cache Conan)
+    - name: Cache Conan
+      uses: actions/cache@v4
+      with:
+        path: ~/.conan2/
+        key: ${{ runner.os }}-conan-${{ hashFiles('**/conanfile.txt') }}
+
+    # Conan install per il plugin
+    - name: Conan install
+      shell: pwsh
+      run: |
+        conan profile detect
+        conan install . -of build --build=missing -pr:b=default -s build_type=Release
+
+    - name: Cache PlotJuggler install
+      uses: actions/cache@v4
+      with:
+        path: pj_install/
+        key: ${{ runner.os }}-plotjuggler-${{ hashFiles('plotjuggler/**') }}
+
+    - name: Clone PlotJuggler
+      run: git clone --depth 1 --branch 3.9.2 https://github.com/facontidavide/PlotJuggler.git plotjuggler
+
+    - name: Build & install PlotJuggler (se non in cache)
+      if: steps.cache-plotjuggler.outputs.cache-hit != 'true'
+      run: |
+        mkdir pj_build
+        cmake -S plotjuggler -B pj_build -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}\pj_install -DCMAKE_BUILD_TYPE=RelWithDebInfo
+        cmake --build pj_build --config RelWithDebInfo --target install
+
+    - name: Build your plugin
+      run: |        
+        Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
+        mkdir build
+        cd build
+        cmake .. -Dplotjuggler_DIR="${{ github.workspace }}\pj_install\lib\cmake\plotjuggler" -DADD_UNITS=OFF
+        cmake --build . --config Release
+        cmake --install . --prefix "${{ github.workspace }}\plugin_install"
+
+    # (Opzionale) Carica come artifact il risultato della build
+    - name: Upload plugin artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: plugin-build
+        path: build/
