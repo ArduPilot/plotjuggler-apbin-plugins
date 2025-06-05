@@ -14,6 +14,13 @@
 #pragma once
 #include <cstdint>
 
+// PACKED_STRUCT macro cross-platform
+#ifdef _MSC_VER
+  #define PACKED_STRUCT(definition) __pragma(pack(push, 1)) definition __pragma(pack(pop))
+#else
+  #define PACKED_STRUCT(definition) definition __attribute__((packed))
+#endif
+
 
 /*
 The contents of this file were mainly taken from the ArduPilot source code:
@@ -125,6 +132,7 @@ static constexpr uint8_t MAX_MULTIPLIERS_SIZE = 17-1;   // max 16 fields per mes
     - file: libraries/AP_Logger/LogStructure.h (commit: b80cc9a)
     - line: 160 - 167
 */
+PACKED_STRUCT(
 struct log_Format {
   LOG_PACKET_HEADER;
   uint8_t type;                   // message id
@@ -132,7 +140,7 @@ struct log_Format {
   char name[MAX_NAME_SIZE];       // message name           example: "PIDR"
   char format[MAX_FORMAT_SIZE];   // format                 example: "QfffffffffB"
   char labels[MAX_LABELS_SIZE];   // label (field names)    example: "TimeUS,Tar,Act,Err,P,I,D,FF,Dmod,SRate,Limit"
-} __attribute__((packed));
+});
 
 
 
@@ -143,10 +151,11 @@ struct log_Format {
     - file: libraries/AP_Logger/LogStructure.h (commit: b80cc9a)
     - line: 183 - 188
 */
+PACKED_STRUCT(
 struct log_Format_Units {
   LOG_PACKET_HEADER;
   uint64_t time_us;
   uint8_t format_type;
   char units[MAX_UNITS_SIZE];               // units        example: "s----------"
   char multipliers[MAX_MULTIPLIERS_SIZE];   // multipliers  example: "F----------"
-} __attribute__((packed));
+});

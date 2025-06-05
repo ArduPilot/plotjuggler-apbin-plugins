@@ -21,6 +21,7 @@
 #include <QDebug>
 #include <chrono>
 #include <cmath>
+#include <array>
 
 
 // Debugging 
