@@ -2,8 +2,6 @@
 
 This repository contains the [ArduPilot Dataflash](https://ardupilot.org/copter/docs/common-logs.html) plugin for [PlotJuggler](https://github.com/facontidavide/PlotJuggler).
 
-:construction: While you should be able to compile the plugin for Windows, this guide is tested for an Ubuntu workflow.
-
 ## Install PlotJuggler
 
 To build any plugin for PlotJuggler, PlotJuggler must be installed on your system.
@@ -73,11 +71,11 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
 PlotJuggler looks for plugins in specific folders. 
 Check **App->Preferences->Plugins** in PlotJuggler to find out which they are and add more if you wish to.
 
-If you have added a folder, you will need to restart PlotJuggler for the chage to take effect.
+If you have added a folder, you will need to restart PlotJuggler for the change to take effect.
 
 ### For prebuilt binaries
 
-You can find a pre-built plugin for Ubuntu in the [Github Releases](https://github.com/ArduPilot/plotjuggler-apbin-plugins/releases) page.
+You can find a pre-built plugin for Ubuntu and Windows in the [Github Releases](https://github.com/ArduPilot/plotjuggler-apbin-plugins/releases) page.
 Copy that binary to one of the PlotJuggler plugin folders.
 
 ### For Docker-built binaries
@@ -94,7 +92,7 @@ Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in o
 
 This plugin allows the units of logged fields to be appended to the logged field names.
 
-**Be carefull:**  
+**Be careful:**  
 
 If you created a PlotJuggler layout without units and then enable the units, the layout will be unusable and vice-versa.
 This is because the units are part of the field name; hence, the original field name no longer exists.
