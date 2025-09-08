@@ -42,7 +42,7 @@ This requires that you have Docker installed in your system.
     Build arguments include:
     - `ADD_UNITS[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
     - `BASE_IMAGE[=ubuntu:22.04]`: Specify the OS image to build off of. It is known that using a different OS than your host OS may result in the plugin not working.
-    - `PJ_TAG[=3.9.2]`: The PlotJuggler git branch or tag to use when cloing and compiling PlotJuggler.
+    - `PJ_TAG[=3.9.2]`: The PlotJuggler git branch or tag to use when cloning and compiling PlotJuggler.
 
 Once compilation is finished, you will find your `.so` plugin in the `artifacts` folder you created previously.
 
