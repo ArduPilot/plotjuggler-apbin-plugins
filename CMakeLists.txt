@@ -1,4 +1,9 @@
 cmake_minimum_required(VERSION 3.7)
+# Fix the warning and enable modern RPATH behavior
+cmake_policy(SET CMP0068 NEW)
+
+# Force the library to use @rpath instead of absolute paths
+set(CMAKE_MACOSX_RPATH ON)
 
 project(plotjuggler_apbin_plugins)
 
@@ -83,6 +88,17 @@ else()
 
 endif()
 
+# 1. Disable the default RPATH (which usually points to Homebrew)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+
+# 2. Tell the plugin to look for Qt inside the PlotJuggler App bundle
+# @executable_path/../Frameworks is where PlotJuggler keeps its Qt
+set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
+
+# 3. Ensure the linker uses this path
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+
 #------- Create the libraries -------
 add_library(DataAPBin SHARED
     DataLoadAPBin/dataload_apbin.h
@@ -94,6 +110,13 @@ target_link_libraries(DataAPBin
 if (COMPILING_WITH_AMENT)
     ament_target_dependencies(DataAPBin plotjuggler)
 endif()
+
+# Ensure the library ID is set to @rpath
+set_target_properties(DataAPBin PROPERTIES 
+    INSTALL_NAME_DIR "@rpath"
+    BUILD_WITH_INSTALL_RPATH TRUE
+)
+
 
 #------- Install the libraries -------
 install(

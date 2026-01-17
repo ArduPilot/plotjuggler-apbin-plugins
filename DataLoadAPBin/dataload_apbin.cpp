@@ -30,7 +30,7 @@
 //#define DEBUG_UNITS
 
 // Config
-//#define LABEL_WITH_UNIT
+#define LABEL_WITH_UNIT
 
 bool is_nearly(double val, int val2)
 {
