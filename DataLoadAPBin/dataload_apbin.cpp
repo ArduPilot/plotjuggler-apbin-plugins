@@ -16,7 +16,7 @@
 #include <QElapsedTimer>
 #include <QDebug>
 #include <cmath>
-#include <sstream>
+#include <cstdio>
 #include <iomanip>
 
 // Debugging 
@@ -373,15 +373,26 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     if ( memcmp(fmt.name, "PARM", 4) == 0 )
     {
       const auto* param = reinterpret_cast<const log_param*>(&buf[total_bytes_used]);
-      // std::string val = std::to_string(param->value) + " -> " + std::to_string(param->default_value);
-      // std::string val = "->   " + std::to_string(param->default_value);
+      std::string name = std::string(param->name);
+      _parameters.push_back({name + "          Default: " + format_value(param->default_value) , param->value});
 
-      // char buffer[16];
-      // std::snprintf(buffer, sizeof(buffer), "%.2f -> %.2f", param->default_value, param->value);
+      // save servo functions
+      QRegExp rx("SERVO(\\d+)_FUNCTION");
+      if (rx.indexIn(QString::fromStdString(name)) != -1) {
+        bool is_int = false;
+        int servo_idx = rx.cap(1).toInt(&is_int);
 
-      std::stringstream ss;
-      ss << std::fixed << std::setprecision(2) << param->default_value << "(" << param->value << ")   ";
-      _parameters.push_back({param->name, ss.str()});
+        if (is_int && servo_idx > 0 && servo_idx <= 32) {
+          const int function_id = static_cast<int>(param->value);
+          // skip over the "disabled" ones
+          if (function_id != 0) {
+            auto it = SERVO_FUNCTION_MAP.find(function_id);
+            if (it != SERVO_FUNCTION_MAP.end()) {
+              _servo_function_labels[servo_idx - 1] = it->second;
+            }
+          }
+        }
+      }
 
       total_bytes_used += fmt.length;
       msgs_read++;
@@ -572,6 +583,19 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
         {
           series_name = "/" + msg_name + "/" + instance_name + "/" + field_name;
         }
+        
+        // label servo functions
+        if (msg_name == "RCOU" || msg_name == "RCO2") {
+          QRegExp re(R"(C(\d+))");
+          if(re.indexIn(QString::fromStdString(field_name)) != -1) {
+            int label_idx = re.cap(1).toInt() - 1; // is 1-based
+
+            if(label_idx >= 0 && label_idx < 32 && !_servo_function_labels[label_idx].empty()) {
+              series_name = series_name + " (" + _servo_function_labels[label_idx] + ")";
+            }
+          }
+        }
+
 
         #ifdef LABEL_WITH_UNIT
           std::string unit_str = get_unit(msg_name, field_name);
@@ -624,11 +648,21 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   std::printf("\n  Skipped messages:\t%d", msgs_skipped);
   std::printf("\n  Skipped bytes:\t%d from %d bytes\n\n", bytes_skipped, len);
 
+  #ifdef DEBUG_RUNTIME
+  for (int i = 0; i < 32; i++) {
+    if (i < 14) {
+      std::printf("\nRCOU.C%d: %s", i + 1, _servo_function_labels[i].c_str());
+    } else {
+      std::printf("\nRCO2.C%d: %s", i + 1, _servo_function_labels[i].c_str());
+    }
+  }
+  #endif
+
   // Now, add the parameters as time series.
   for (const auto& param : _parameters)
   {
-    StringSeries& series = plot_data.addStringSeries(std::string("/1_Parameters/") + param.name)->second;
-    series.pushBack({0.0, param.default_and_value});
+    auto series = plot_data.addNumeric(std::string("/1_Parameters/") + param.name);
+    series->second.pushBack({300, param.value});
   }
 
 
@@ -658,6 +692,18 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #endif
 
   return true;
+}
+
+std::string DataLoadAPBIN::format_value(float val) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2) << val;
+    std::string s = ss.str();
+
+    // trim trailing zeros
+    s.erase(s.find_last_not_of('0') + 1);
+    if (!s.empty() && s.back() == '.') s.pop_back();
+
+    return s;
 }
 
 void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const uint8_t* msg)
