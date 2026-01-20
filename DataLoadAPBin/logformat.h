@@ -182,7 +182,7 @@ struct log_message {
 struct Parameter
 {
   std::string name;
-  std::string default_and_value;
+  double value;
 };
 
 struct StatusText
