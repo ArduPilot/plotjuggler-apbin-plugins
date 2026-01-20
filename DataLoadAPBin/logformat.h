@@ -13,6 +13,8 @@
 
 #pragma once
 #include <cstdint>
+#include <QMetaType>
+#include <vector>
 
 // PACKED_STRUCT macro cross-platform
 #ifdef _MSC_VER
@@ -159,3 +161,38 @@ struct log_Format_Units {
   char units[MAX_UNITS_SIZE];               // units        example: "s----------"
   char multipliers[MAX_MULTIPLIERS_SIZE];   // multipliers  example: "F----------"
 });
+
+
+PACKED_STRUCT(
+struct log_param {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    char name[16];
+    float value;
+    float default_value;
+});
+
+PACKED_STRUCT(
+struct log_message {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    char msg[64];
+});
+
+struct Parameter
+{
+  std::string name;
+  std::string default_and_value;
+};
+
+struct StatusText
+{
+  uint64_t timestamp;
+  uint8_t severity;
+  std::string msg;
+};
+
+Q_DECLARE_METATYPE(Parameter);
+Q_DECLARE_METATYPE(StatusText);
+Q_DECLARE_METATYPE(std::vector<Parameter>);
+Q_DECLARE_METATYPE(std::vector<StatusText>);

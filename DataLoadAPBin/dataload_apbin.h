@@ -109,4 +109,7 @@ private:
   void apply_timesync(void);
 
   static double gps_to_unix_time(double gps_week, double gps_ms_of_week);
+
+  std::vector<Parameter> _parameters;
+  std::vector<StatusText> _status_texts;
 };

@@ -13,15 +13,11 @@
 
 #include "dataload_apbin.h"
 #include <QFile>
-#include <QMessageBox>
-#include <QProgressDialog>
-#include <QDateTime>
-#include <QInputDialog>
 #include <QElapsedTimer>
 #include <QDebug>
-#include <chrono>
 #include <cmath>
-#include <array>
+#include <sstream>
+#include <iomanip>
 
 // Debugging 
 //#define DEBUG_RUNTIME
@@ -48,6 +44,8 @@ bool is_nearly(double val, int val2)
 DataLoadAPBIN::DataLoadAPBIN()
 {
   extensions.push_back("BIN");  // TODO : this doesn't work for now as tolower() is hardcoded.
+  qRegisterMetaType<std::vector<Parameter>>();
+  qRegisterMetaType<std::vector<StatusText>>();
 }
 
 const std::vector<const char*>& DataLoadAPBIN::compatibleFileExtensions() const
@@ -89,18 +87,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   const uint32_t len = file_array.size();
   uint32_t total_bytes_used = 0;
 
-  // Progress box for large file
-  QProgressDialog progress_dialog;
-  progress_dialog.setLabelText("Loading ArduPilot logfile... please wait");
-  progress_dialog.setWindowModality(Qt::ApplicationModal);
-  progress_dialog.setRange(0, 100);
-  progress_dialog.setAutoClose(true);
-  progress_dialog.setAutoReset(true);
-  progress_dialog.show();
-
-  int progress{ 0 };
-  int progress_update{ 0 };
-
   uint32_t bytes_skipped{ 0 };
   uint32_t msgs_skipped{ 0 };
   uint32_t msgs_read{ 0 };
@@ -122,23 +108,9 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
   while (true)
   {
-    // update the progression dialog box
-    progress_update = static_cast<int>((static_cast<double>(total_bytes_used) / static_cast<double>(file_size)) * 100.0);
-    if ( (progress_update - 4) > progress )
-    {
-      progress = progress_update;
-      progress_dialog.setValue(progress);
-      QApplication::processEvents();
-      if (progress_dialog.wasCanceled())
-      {
-        return false;
-      }
-    }
-
     // check if end of file is reached
     if (len - total_bytes_used < LOG_PACKET_HEADER_LEN)
     {
-      progress_dialog.setValue(100);
       bytes_skipped += len - total_bytes_used;
       break;
     }
@@ -267,7 +239,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     //  - if we reached the end of the log, just end
     if (len - total_bytes_used < fmt.length)
     {
-      progress_dialog.setValue(100);
       bytes_skipped += len - total_bytes_used;
       break;
     }
@@ -392,14 +363,28 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     }
     if ( memcmp(fmt.name, "MSG", 3) == 0 )
     {
+      const auto* msg = reinterpret_cast<const log_message*>(&buf[total_bytes_used]);
+      _status_texts.push_back({msg->time_us, 0, msg->msg});
+
       total_bytes_used += fmt.length;
-      msgs_skipped++;
+      msgs_read++;
       continue;
     }
     if ( memcmp(fmt.name, "PARM", 4) == 0 )
     {
+      const auto* param = reinterpret_cast<const log_param*>(&buf[total_bytes_used]);
+      // std::string val = std::to_string(param->value) + " -> " + std::to_string(param->default_value);
+      // std::string val = "->   " + std::to_string(param->default_value);
+
+      // char buffer[16];
+      // std::snprintf(buffer, sizeof(buffer), "%.2f -> %.2f", param->default_value, param->value);
+
+      std::stringstream ss;
+      ss << std::fixed << std::setprecision(2) << param->default_value << "(" << param->value << ")   ";
+      _parameters.push_back({param->name, ss.str()});
+
       total_bytes_used += fmt.length;
-      msgs_skipped++;
+      msgs_read++;
       continue;
     }
 
@@ -638,6 +623,39 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   std::printf("\n  Read messages:\t%d", msgs_read);
   std::printf("\n  Skipped messages:\t%d", msgs_skipped);
   std::printf("\n  Skipped bytes:\t%d from %d bytes\n\n", bytes_skipped, len);
+
+  // Now, add the parameters as time series.
+  for (const auto& param : _parameters)
+  {
+    StringSeries& series = plot_data.addStringSeries(std::string("/1_Parameters/") + param.name)->second;
+    series.pushBack({0.0, param.default_and_value});
+  }
+
+
+  #ifdef DEBUG_MESSAGES
+  std::printf("Message Log\n---------------");
+  #endif
+  for(int i = 0; i < _status_texts.size(); i++)
+  {
+    #ifdef DEBUG_MESSAGES
+    std::printf("\n %llu: %s", _status_texts[i].timestamp, _status_texts[i].msg.c_str());
+    #endif
+
+    // change "/" to "\" if a status_text contains one so it doesn't create a child entry
+    std::string msg = _status_texts[i].msg;
+    size_t start_pos = 0;
+    while((start_pos = msg.find('/', start_pos)) != std::string::npos) {
+        msg.replace(start_pos, 1, "\\");
+        start_pos += 2; // Handles cases where the replacement also contains the search string
+    }
+
+    auto series = plot_data.addNumeric(std::string("/2_MessageLog/") + std::to_string(i) + ": " + msg);
+    series->second.pushBack({0.0, static_cast<double>(_status_texts[i].timestamp)});
+  }
+
+  #ifdef DEBUG_MESSAGES
+  std::printf("\n---------------\n");
+  #endif
 
   return true;
 }
