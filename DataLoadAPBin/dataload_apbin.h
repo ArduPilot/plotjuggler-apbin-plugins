@@ -86,8 +86,9 @@ private:
   std::map<std::string, std::map<std::string, uint8_t>> field_name2idx;
 
 
-  // helper
-  std::string format_value(float val);
+  // helpers
+  std::string format_default_value(float val);
+  std::string format_time(double seconds);
 
   // fill the message_data for a message according to the message format
   void handle_message_received(const struct log_Format& fmt, const uint8_t* msg);
@@ -112,6 +113,8 @@ private:
   void apply_timesync(void);
 
   static double gps_to_unix_time(double gps_week, double gps_ms_of_week);
+  double _start_plot_time;
+  double _time_offset;
 
   std::vector<Parameter> _parameters;
   std::vector<StatusText> _status_texts;

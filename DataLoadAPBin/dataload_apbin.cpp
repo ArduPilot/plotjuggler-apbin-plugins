@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstdio>
 #include <iomanip>
+#include <sstream>
 
 // Debugging 
 //#define DEBUG_RUNTIME
@@ -374,7 +375,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     {
       const auto* param = reinterpret_cast<const log_param*>(&buf[total_bytes_used]);
       std::string name = std::string(param->name);
-      _parameters.push_back({name + "          Default: " + format_value(param->default_value) , param->value});
+      _parameters.push_back({name + "          Default: " + format_default_value(param->default_value) , param->value});
 
       // save servo functions
       QRegExp rx("SERVO(\\d+)_FUNCTION");
@@ -661,7 +662,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   // Now, add the parameters as time series.
   for (const auto& param : _parameters)
   {
-    auto series = plot_data.addNumeric(std::string("/1_Parameters/") + param.name);
+    auto series = plot_data.addNumeric(std::string("/1. Parameters/") + param.name);
     series->second.pushBack({300, param.value});
   }
 
@@ -669,6 +670,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #ifdef DEBUG_MESSAGES
   std::printf("Message Log\n---------------");
   #endif
+
   for(int i = 0; i < _status_texts.size(); i++)
   {
     #ifdef DEBUG_MESSAGES
@@ -683,8 +685,13 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
         start_pos += 2; // Handles cases where the replacement also contains the search string
     }
 
-    auto series = plot_data.addNumeric(std::string("/2_MessageLog/") + std::to_string(i) + ": " + msg);
-    series->second.pushBack({0.0, static_cast<double>(_status_texts[i].timestamp)});
+    auto time_s = static_cast<double>(_status_texts[i].timestamp)/1e6;
+
+    auto& timeline = plot_data.getOrCreateNumeric("/2. Message Timeline");
+    timeline.pushBack({time_s + _time_offset, (double)(i + 1)});
+
+    auto series = plot_data.addNumeric(std::string("/3. Message Log/") + std::to_string(i + 1) + ". " + msg);
+    series->second.pushBack({0.0, time_s - _start_plot_time});
   }
 
   #ifdef DEBUG_MESSAGES
@@ -694,7 +701,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   return true;
 }
 
-std::string DataLoadAPBIN::format_value(float val) {
+std::string DataLoadAPBIN::format_default_value(float val) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2) << val;
     std::string s = ss.str();
@@ -704,6 +711,29 @@ std::string DataLoadAPBIN::format_value(float val) {
     if (!s.empty() && s.back() == '.') s.pop_back();
 
     return s;
+}
+
+std::string DataLoadAPBIN::format_time(double seconds)
+{
+    int minutes = static_cast<int>(seconds / 60.0);
+    double rem = seconds - minutes * 60.0;
+
+    int secs = static_cast<int>(rem);
+    int tenths = static_cast<int>(std::round((rem - secs) * 10.0));
+
+    // handle rounding overflow (e.g. 59.96 -> 1:00.0)
+    if (tenths == 10) {
+        tenths = 0;
+        secs++;
+        if (secs == 60) {
+            secs = 0;
+            minutes++;
+        }
+    }
+
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%d:%02d.%d", minutes, secs, tenths);
+    return buf;
 }
 
 void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const uint8_t* msg)
@@ -1175,6 +1205,10 @@ void DataLoadAPBIN::apply_timesync(void)
 
   const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_ms);
   const double time_offset_sec = unix_time_sec - log_time_sec;
+
+  // Expose the offset for the status-text / parameter / message-timeline series
+  _start_plot_time = log_time_sec;
+  _time_offset     = time_offset_sec;
 
   shift_all_timestamps(messages_map, field_name2idx, time_offset_sec);
 }
