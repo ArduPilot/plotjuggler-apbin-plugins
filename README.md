@@ -88,6 +88,19 @@ If you compiled the plugin in your host system, the plugin has been installed to
 
 Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in one of the folders PlotJuggler already scans.
 
+## Notes for building on MacOS
+Some of the dependencies weren't found automatically, I had to run the following to make everything happy (These might be specific to my setup, but I figure it might help someone else as well. Obviously update your paths accordingly).
+```
+cmake -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@5;~/plotjuggler_ws/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="~/plotjuggler_ws/install/lib;~/plotjuggler_ws/build/PlotJuggler" ..
+
+export LIBRARY_PATH="$LIBRARY_PATH:~/plotjuggler_ws/install/lib"
+```
+If using this plugin with the new official PlotJuggler .dmg releases, you may ran into signing and security issues. This command allowed me to run a custom plugin on a signed version of PlotJuggler:
+```
+sudo codesign --force --deep --sign - /Applications/PlotJuggler.app
+```
+As far as I understand, this adds your signature to the app so your plugin and the official .dmg now share a common signature.
+
 ## Displaying units
 
 This plugin allows the units of logged fields to be appended to the logged field names.

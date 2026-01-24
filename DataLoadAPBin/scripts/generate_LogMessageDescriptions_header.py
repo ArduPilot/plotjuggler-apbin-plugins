@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Generate a C header containing raw string literals with embedded XML
-for Plane.xml and Copter.xml if present. If they are missing, emit
-empty strings so the code compiles but no embedded content is used.
+for files from https://autotest.ardupilot.org/LogMessages/ (i.e. Plane.xml and Copter.xml)
+If they are missing, emit empty strings so the code compiles but no embedded content is used.
 
 Usage:
   generate_LogMessageDescriptions_header.py <input_dir> <output_header>
 
-The script reads any xml files in <input_dir> if present.
+The script reads any xml files in <input_dir> and merges them into a single header file.
+Any updates to the XML files requires rebuilding the project to embed the new content.
 """
 import sys
 import os
