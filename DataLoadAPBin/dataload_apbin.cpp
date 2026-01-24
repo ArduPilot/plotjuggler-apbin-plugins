@@ -15,10 +15,17 @@
 #include <QFile>
 #include <QElapsedTimer>
 #include <QDebug>
+#include <QXmlStreamReader>
+#include <QFileInfo>
+#include <QDir>
+#include <QCoreApplication>
+#include "LogMessageDescriptions.h"
 #include <cmath>
 #include <cstdio>
 #include <iomanip>
 #include <sstream>
+#include <cstring>
+#include <cctype>
 
 // Debugging 
 //#define DEBUG_RUNTIME
@@ -531,6 +538,11 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #endif
 
   // -------------------- publish to plotjuggler -------------------- //
+#ifdef QT_CORE_LIB
+  load_log_messages(info->filename);
+#else
+  load_log_messages(info->filename);
+#endif
   #ifdef DEBUG_RUNTIME
     auto publish_start = std::chrono::high_resolution_clock::now();
   #endif
@@ -563,6 +575,10 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       const std::vector<double>& timestamps = msg_data[time_idx].second;
 
       size_t idx = 0;
+      bool message_desc_assigned = false;
+      std::string message_desc;
+      auto mit = _message_tooltips.find(msg_name);
+      if (mit != _message_tooltips.end()) message_desc = mit->second;
       for (const auto& field : msg_data)
       {
         if ( idx == time_idx || ( has_instance[msg_id] && (idx == instance_idx[msg_id]) ) )
@@ -607,6 +623,30 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
         #endif
                 
         auto series = plot_data.addNumeric(series_name);
+
+        // Prefer per-field descriptions. Only attach message description to the
+        // first series for this message instance that does not have a field description.
+        std::string field_desc;
+        auto fit_map_it = _field_tooltips.find(msg_name);
+        if (fit_map_it != _field_tooltips.end())
+        {
+          auto fit = fit_map_it->second.find(field_name);
+          if (fit != fit_map_it->second.end())
+          {
+            field_desc = fit->second;
+          }
+        }
+
+        if (!field_desc.empty())
+        {
+          series->second.setAttribute(PJ::TOOL_TIP, QString::fromStdString(field_desc));
+        }
+        else if (!message_desc_assigned && !message_desc.empty())
+        {
+          // attach message description once for this instance
+          series->second.setAttribute(PJ::TOOL_TIP, QString::fromStdString(message_desc));
+          message_desc_assigned = true;
+        }
 
         for (size_t i = 0; i < field.second.size(); i++)
         {
@@ -984,6 +1024,75 @@ std::string DataLoadAPBIN::get_unit(const std::string& msg_name, const std::stri
 
   return unit_it->second;
 }
+
+
+void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
+{
+  // Helper to parse a QXmlStreamReader and merge descriptions
+  auto parseXml = [&](QXmlStreamReader &xml) {
+    while (!xml.atEnd() && !xml.hasError())
+    {
+      xml.readNext();
+      if (xml.isStartElement() && xml.name() == QLatin1String("logformat"))
+      {
+        QString msgName = xml.attributes().value(QLatin1String("name")).toString();
+        QString msgDesc;
+
+        // process children until end of this logformat
+        while (!(xml.isEndElement() && xml.name() == QLatin1String("logformat")))
+        {
+          xml.readNext();
+          if (xml.isStartElement())
+          {
+            if (xml.name() == QLatin1String("description"))
+            {
+              msgDesc = xml.readElementText().trimmed();
+              _message_tooltips[msgName.toStdString()] = msgDesc.toStdString();
+            }
+            else if (xml.name() == QLatin1String("field"))
+            {
+              QString fieldName = xml.attributes().value(QLatin1String("name")).toString();
+              // read inside field until end
+              while (!(xml.isEndElement() && xml.name() == QLatin1String("field")))
+              {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == QLatin1String("description"))
+                {
+                  QString fdesc = xml.readElementText().trimmed();
+                  _field_tooltips[msgName.toStdString()][fieldName.toStdString()] = fdesc.toStdString();
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  // First, parse embedded XMLs compiled into the library (if present).
+  // Use a sanity check on the embedded C-string rather than relying on sizeof.
+  if (kEmbeddedLogMessagesXml[0] != '\0')
+  {
+    const char* emb = kEmbeddedLogMessagesXml;
+    size_t emb_len = std::strlen(emb);
+    // require a minimal length and at least one '<' character after skipping whitespace
+    if (emb_len > 10)
+    {
+      size_t i = 0;
+      while (i < emb_len && std::isspace(static_cast<unsigned char>(emb[i]))) ++i;
+      if (i < emb_len && emb[i] == '<')
+      {
+        QXmlStreamReader xmlEmbedded(QString::fromUtf8(emb));
+        parseXml(xmlEmbedded);
+        if (xmlEmbedded.hasError())
+        {
+          qDebug() << "Warning: embedded log message XML parse error:" << xmlEmbedded.errorString();
+        }
+      }
+    }
+  }
+}
+
 
 void DataLoadAPBIN::apply_multipliers(void)
 {
