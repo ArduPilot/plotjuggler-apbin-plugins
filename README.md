@@ -20,7 +20,7 @@ If you wish to build `plotjuggler-apbin-plugin` follow these steps.
 ```
 git clone https://github.com/ArduPilot/plotjuggler-apbin-plugins
 ```
-    
+
 ### 2a. Compile via Docker
 
 This requires that you have Docker installed in your system.
@@ -48,10 +48,14 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
 
 ### 2b. Compile locally
 
+1. Clone and compile PlotJuggler [following the instructions](https://github.com/facontidavide/PlotJuggler/blob/main/COMPILE.md).
+    Make a note of the workspace folder you created (where the `src`, `build` and `install` folders live).
 1. Install the dependencies:  
-    The plugin uses Qt as dependency. Since PlotJuggler also depends on Qt, chances are high that you already have it installed. On Ubuntu Qt can be installed with:
+    The plugin uses Qt as dependency.
+    Since PlotJuggler also depends on Qt, chances are high that you already have it installed.
+    On Ubuntu Qt can be installed with:
 
-    ```
+    ```bash
     sudo apt -y install qtbase5-dev libqt5svg5-dev
     ```
 
@@ -59,16 +63,36 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
 
 3. Compile using cmake:
 
-    ```
+    ```bash
+    export PJ_WS=<absolute_path_to_plotjugger_workspace>
+    export LIBRARY_PATH="$LIBRARY_PATH:$PJ_WS/install/lib"
     mkdir build; cd build
-    cmake ..
+    cmake -DCMAKE_PREFIX_PATH="$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
     make
     sudo make install
     ```
 
+### Notes for building on MacOS
+
+Qt dependencies may not be found automatically.
+If you run into issues, try this `cmake` command instead:
+
+```bash
+cmake -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@5;$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
+```
+
+If using this plugin with the new official PlotJuggler .dmg releases, you may run into signing and security issues.
+This command allows running a custom plugin on a signed version of PlotJuggler:
+
+```bash
+sudo codesign --force --deep --sign - /Applications/PlotJuggler.app
+```
+
+This likely adds your signature to the app so your plugin and the official .dmg now share a common signature.
+
 ## Install plotjuggler-apbin-plugin
 
-PlotJuggler looks for plugins in specific folders. 
+PlotJuggler looks for plugins in specific folders.
 Check **App->Preferences->Plugins** in PlotJuggler to find out which they are and add more if you wish to.
 
 If you have added a folder, you will need to restart PlotJuggler for the change to take effect.
@@ -87,19 +111,6 @@ If you used Docker to compile the plugin, copy the build artifact from the `arti
 If you compiled the plugin in your host system, the plugin has been installed to `/usr/local/bin/`.  
 
 Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in one of the folders PlotJuggler already scans.
-
-## Notes for building on MacOS
-Some of the dependencies weren't found automatically, I had to run the following to make everything happy (These might be specific to my setup, but I figure it might help someone else as well. Obviously update your paths accordingly).
-```
-cmake -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@5;~/plotjuggler_ws/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="~/plotjuggler_ws/install/lib;~/plotjuggler_ws/build/PlotJuggler" ..
-
-export LIBRARY_PATH="$LIBRARY_PATH:~/plotjuggler_ws/install/lib"
-```
-If using this plugin with the new official PlotJuggler .dmg releases, you may ran into signing and security issues. This command allowed me to run a custom plugin on a signed version of PlotJuggler:
-```
-sudo codesign --force --deep --sign - /Applications/PlotJuggler.app
-```
-As far as I understand, this adds your signature to the app so your plugin and the official .dmg now share a common signature.
 
 ## Displaying units
 
