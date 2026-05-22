@@ -101,3 +101,7 @@ install(
         DataAPBin
     DESTINATION
         ${PJ_PLUGIN_INSTALL_DIRECTORY}  )
+
+if (COMPILING_WITH_AMENT)
+    ament_package()
+endif()
