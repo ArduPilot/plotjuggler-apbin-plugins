@@ -61,6 +61,25 @@ const std::vector<const char*>& DataLoadAPBIN::compatibleFileExtensions() const
 
 bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_data)
 {
+  // Reset all per-load state. Without this, member variables persist across
+  // file loads in the same PlotJuggler session: stale has_instance / instance_offset
+  // entries from a previous log get applied to the current one whenever ArduPilot
+  // recycles a msg_id, producing bogus per-instance topics (e.g. HEAT split into
+  // dozens of "#N" children) and skewed timestamps from re-applied multipliers.
+  std::fill(std::begin(has_fmt), std::end(has_fmt), false);
+  std::fill(std::begin(has_fmtu), std::end(has_fmtu), false);
+  std::fill(std::begin(has_instance), std::end(has_instance), false);
+  std::fill(std::begin(instance_idx), std::end(instance_idx), -1);
+  std::fill(std::begin(instance_offset), std::end(instance_offset), 0u);
+  for (auto& f : formats) { f = {}; }
+  for (auto& fu : format_units) { fu = {}; }
+  for (auto& n : msg_id2name) { n.clear(); }
+  msg_name2id.clear();
+  field_name2idx.clear();
+  messages_map.clear();
+  multipliers.clear();
+  units.clear();
+
   QFile file(info->filename);
   if (!file.open(QFile::ReadOnly))
   {
