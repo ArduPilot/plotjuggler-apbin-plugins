@@ -1,5 +1,4 @@
-ARG BASE_IMAGE=ubuntu:22.04
-FROM ${BASE_IMAGE} AS build-stage
+FROM ubuntu:22.04 AS build-stage
 
 ARG PJ_TAG=3.9.2
 
@@ -29,18 +28,16 @@ RUN cmake -S src/PlotJuggler -B build/PlotJuggler -DCMAKE_INSTALL_PREFIX=install
 ARG ADD_UNITS=OFF
 
 COPY --link . /apbin_plugin
+
 WORKDIR /apbin_plugin/build
 # Ensure a fresh build folder
 RUN rm -Rf * \
     && cmake -Dplotjuggler_DIR="/plotjuggler_ws/install/lib/cmake/plotjuggler" -DADD_UNITS=${ADD_UNITS} .. \
-    && make \
+    && make -j"$(nproc)" \
     && make install \
     && mkdir /artifacts \
     && cp libDataAPBin.so /artifacts
 
-###############################################################################
-# Export the plugin
-###############################################################################
 FROM scratch AS export-stage
 # Move the plugin to a fresh filesystem that can be exported easily.
 COPY --from=build-stage /artifacts /
