@@ -947,10 +947,10 @@ void DataLoadAPBIN::apply_multipliers(void)
 
 double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
 {
-    static constexpr double SECONDS_PER_WEEK       = 60 * 60 * 24 * 7;   // 60 * 60 * 24 * 7
-    static constexpr double MS_PER_SECOND          = 1000.0;
-    static constexpr double GPS2UNIX_TIME_OFFSET   = 315964800.0; // Unix epoch vs GPS epoch
-    static constexpr double GPS2UNIX_LEAP_SECONDS  = -18.0;       // Current leap seconds
+    static constexpr double SECONDS_PER_WEEK      = 60 * 60 * 24 * 7;   // 60 * 60 * 24 * 7
+    static constexpr double MS_PER_SECOND         = 1000.0;
+    static constexpr double GPS2UNIX_TIME_OFFSET  = 315964800.0; // Unix epoch vs GPS epoch
+    static constexpr double GPS2UNIX_LEAP_SECONDS = -18.0;       // Current leap seconds
 
     const double gps_week_seconds = gps_ms_of_week / MS_PER_SECOND;
 
@@ -958,6 +958,116 @@ double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
          + gps_week_seconds
          + GPS2UNIX_TIME_OFFSET
          + GPS2UNIX_LEAP_SECONDS;
+}
+
+namespace
+{
+
+  // Small struct to carry all four resolved GPS field indices together,
+  // instead of passing four separate uint8_t out-parameters around.
+  struct GpsFieldIndices
+  {
+    uint8_t time_idx;
+    uint8_t week_idx;
+    uint8_t ms_idx;
+    uint8_t nsats_idx;
+  };
+
+  // Resolves the index of each required GPS field by name.
+  // Returns std::nullopt (and prints a clear message) if any field is
+  // missing, instead of silently defaulting to index 0 via
+  // std::map::operator[].
+  std::optional<GpsFieldIndices> resolve_gps_field_indices(
+      const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx)
+  {
+    const auto gps_fields_it = field_name2idx.find("GPS");
+    if (gps_fields_it == field_name2idx.end())
+    {
+      std::printf("Skipping timesync because the logfile has no field definitions for GPS\n");
+      return std::nullopt;
+    }
+    const auto& gps_fields = gps_fields_it->second;
+
+    auto find_field = [&](const std::string& label) -> std::optional<uint8_t>
+    {
+      const auto it = gps_fields.find(label);
+      if (it == gps_fields.end())
+      {
+        std::printf("Skipping timesync because GPS message has no '%s' field!\n", label.c_str());
+        return std::nullopt;
+      }
+      return it->second;
+    };
+
+    const auto time_idx  = find_field("TimeUS");
+    const auto week_idx  = find_field("GWk");
+    const auto ms_idx    = find_field("GMS");
+    const auto nsats_idx = find_field("NSats");
+
+    if (!time_idx || !week_idx || !ms_idx || !nsats_idx)
+    {
+      return std::nullopt;
+    }
+
+    return GpsFieldIndices{ *time_idx, *week_idx, *ms_idx, *nsats_idx };
+  }
+
+  // Scans the logged GPS timeline for the first sample with a usable fix:
+  // enough satellites, and non-zero TimeUS/GWk/GMS. GWk in particular must be
+  // checked, since a sample can report NSats > 4 and non-zero TimeUS/GMS
+  // while GWk is still 0 (week number not yet resolved) - accepting that
+  // sample would anchor the whole log to the GPS epoch (1980-01-06).
+  std::optional<size_t> find_first_valid_gps_sample(
+      const std::vector<double>& time_vec,
+      const std::vector<double>& week_vec,
+      const std::vector<double>& ms_vec,
+      const std::vector<double>& nsats_vec,
+      double min_nsats)
+  {
+    for (size_t i = 0; i < time_vec.size(); ++i)
+    {
+      if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() &&
+          nsats_vec[i] >= min_nsats &&
+          time_vec[i]  != 0.0 &&
+          week_vec[i]  > 0.0  &&
+          ms_vec[i]    > 0.0)
+      {
+        return i;
+      }
+    }
+    return std::nullopt;
+  }
+
+  void shift_all_timestamps(
+    std::map<std::string, std::map<int8_t,
+        std::vector<std::pair<std::string, std::vector<double>>>>>& messages_map,
+    const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx,
+    double time_offset_sec)
+  {
+    for (auto& [msg_name, instances_map] : messages_map)
+    {
+      const auto msg_fields_it = field_name2idx.find(msg_name);
+      if (msg_fields_it == field_name2idx.end())
+      {
+        continue;
+      }
+
+      const auto time_idx_it = msg_fields_it->second.find("TimeUS");
+      if (time_idx_it == msg_fields_it->second.end())
+      {
+        continue;
+      }
+      const auto& msg_time_idx = time_idx_it->second;
+
+      for (auto& [instance_id, msg_data] : instances_map)
+      {
+        std::vector<double>& timestamps = msg_data[msg_time_idx].second;
+        std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
+                        [time_offset_sec](double t) { return t + time_offset_sec; });
+      }
+    }
+  }
+
 }
 
 void DataLoadAPBIN::apply_timesync(void)
@@ -974,126 +1084,33 @@ void DataLoadAPBIN::apply_timesync(void)
   // Target the first available GPS instance (typically Instance 0)
   const auto& first_gps_instance = msg_it->second.begin()->second;
 
-  // Safely look up the GPS field-name -> index map first
-  const auto gps_fields_it = field_name2idx.find("GPS");
-  if (gps_fields_it == field_name2idx.end())
-  {
-    std::printf("Skipping timesync because the logfile has no field definitions for 'GPS'\n");
-    return;
-  }
-  const auto& gps_fields = gps_fields_it->second;
-
-  // Safely resolve each required field index, bailing out with a clear
-  // error if any label is missing instead of silently defaulting to 0
-  // (which is what operator[] on a std::map would otherwise do).
-  auto require_field = [&](const std::string& label, uint8_t& out_idx) -> bool
-  {
-    const auto it = gps_fields.find(label);
-    if (it == gps_fields.end())
-    {
-      std::printf("Skipping timesync because GPS message has no '%s' field!\n", label.c_str());
-      return false;
-    }
-    out_idx = it->second;
-    return true;
-  };
-
-  uint8_t time_idx{ 0 };
-  uint8_t week_idx{ 0 };
-  uint8_t ms_idx{ 0 };
-  uint8_t nsats_idx{ 0 };
-
-  if (!require_field("TimeUS", time_idx)  ||
-      !require_field("GWk",    week_idx)  ||
-      !require_field("GMS",    ms_idx)    ||
-      !require_field("NSats",  nsats_idx))
+  const auto field_indices = resolve_gps_field_indices(field_name2idx);
+  if (!field_indices)
   {
     return;
   }
 
-  // Extract the actual vectors of logged data points
-  const auto& time_vec  = first_gps_instance.at(time_idx).second;
-  const auto& week_vec  = first_gps_instance.at(week_idx).second;
-  const auto& ms_vec    = first_gps_instance.at(ms_idx).second;
-  const auto& nsats_vec = first_gps_instance.at(nsats_idx).second;
+  const auto& time_vec  = first_gps_instance.at(field_indices->time_idx).second;
+  const auto& week_vec  = first_gps_instance.at(field_indices->week_idx).second;
+  const auto& ms_vec    = first_gps_instance.at(field_indices->ms_idx).second;
+  const auto& nsats_vec = first_gps_instance.at(field_indices->nsats_idx).second;
 
-  // DEBUG: confirm units of time_vec before trusting any conversion assumption.
-  // If these print as small fractional numbers (e.g. 45.231), TimeUS is already
-  // in seconds after apply_multipliers() ran. If they print as huge raw integers
-  // (e.g. 45231000), TimeUS is still in microseconds at this point.
-  if (!time_vec.empty())
-  {
-    std::printf("DEBUG: raw time_vec.front()=%.6f time_vec.back()=%.6f\n",
-                time_vec.front(), time_vec.back());
-  }
+  const auto valid_sample_idx =
+      find_first_valid_gps_sample(time_vec, week_vec, ms_vec, nsats_vec, MIN_VALID_NSATS);
 
-  size_t valid_sample_idx = 0;
-  bool found_valid_fix = false;
-
-  // Loop THROUGH THE TIMELINE of logged GPS samples
-  for (size_t i = 0; i < time_vec.size(); ++i)
-  {
-    if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() &&
-        nsats_vec[i] >= MIN_VALID_NSATS &&   // relaxed to >=
-        time_vec[i]  != 0.0 &&               // added missing check
-        week_vec[i]  > 0.0 &&
-        ms_vec[i]    > 0.0)
-    {
-      valid_sample_idx = i;
-      found_valid_fix = true;
-      break;
-    }
-  }
-
-  if (!found_valid_fix)
+  if (!valid_sample_idx)
   {
     std::printf("Skipping timesync because no sequential GPS sample with a valid fix was found\n");
     return;
   }
 
-  // Extract values at the valid chronological index found
-  const double gps_week    = week_vec[valid_sample_idx];
-  const double gps_week_ms = ms_vec[valid_sample_idx];
+  const double gps_week    = week_vec[*valid_sample_idx];
+  const double gps_week_ms = ms_vec[*valid_sample_idx];
 
-  // TimeUS is already in SECONDS by this point, because apply_multipliers()
-  // runs before apply_timesync() and rescales TimeUS using its FMTU multiplier
-  // (commonly 0.000001, converting raw microseconds to seconds). Dividing by
-  // 1e6 again here was the bug that collapsed the whole log into a
-  // sub-one-second time range.
-  const double log_time_sec = time_vec[valid_sample_idx];
+  const double log_time_sec = time_vec[*valid_sample_idx];
 
-  // Get Unix time directly in SECONDS (e.g., 1750692063.6)
-  const double unix_time_sec = gps_to_unix_time(gps_week, gps_week_ms);
-
-  // Calculate offset purely in SECONDS
+  const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_ms);
   const double time_offset_sec = unix_time_sec - log_time_sec;
 
-  std::printf("DEBUG: idx=%zu gps_week=%.3f gps_week_ms=%.3f log_time_sec=%.6f unix_time_sec=%.3f offset=%.3f\n",
-              valid_sample_idx, gps_week, gps_week_ms, log_time_sec, unix_time_sec, time_offset_sec);
-
-  // Apply the offset to every message's TimeUS vector (already in seconds)
-  for (auto& [msg_name, instances_map] : messages_map)
-  {
-    const auto msg_fields_it = field_name2idx.find(msg_name);
-    if (msg_fields_it == field_name2idx.end())
-    {
-      continue;
-    }
-
-    const auto time_idx_it = msg_fields_it->second.find("TimeUS");
-    if (time_idx_it == msg_fields_it->second.end())
-    {
-      continue;
-    }
-    const auto& msg_time_idx = time_idx_it->second;
-
-    for (auto& [instance_id, msg_data] : instances_map)
-    {
-      std::vector<double>& timestamps = msg_data[msg_time_idx].second;
-
-      // No conversion needed here anymore — just shift by the computed offset
-      std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
-                      [time_offset_sec](double t) { return t + time_offset_sec; });
-    }
-  }
+  shift_all_timestamps(messages_map, field_name2idx, time_offset_sec);
 }
