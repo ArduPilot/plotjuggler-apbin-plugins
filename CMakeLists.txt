@@ -63,6 +63,14 @@ IF(ADD_UNITS)
 ENDIF(ADD_UNITS)
 
 
+#-------------- Switch RCOU/RCO2 function labels ----------------
+OPTION(ADD_RCOU_FUNCTION_LABELS "Add RCOU/RCO2 servo function labels" OFF)
+IF(ADD_RCOU_FUNCTION_LABELS)
+    add_compile_definitions("LABEL_RCOU_FUNCTION")
+    message(STATUS "Enabling RCOU/RCO2 function labels define.")
+ENDIF(ADD_RCOU_FUNCTION_LABELS)
+
+
 #------- Create the library -------
 add_library(DataAPBin SHARED
     DataLoadAPBin/dataload_apbin.h
@@ -124,6 +132,3 @@ install(
 if (COMPILING_WITH_AMENT)
     ament_package()
 endif()
-    TARGETS DataAPBin
-    DESTINATION ${PJ_PLUGIN_INSTALL_DIRECTORY}
-)

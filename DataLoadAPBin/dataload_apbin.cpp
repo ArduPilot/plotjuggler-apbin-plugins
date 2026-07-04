@@ -384,6 +384,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       std::string name = std::string(param->name);
       _parameters.push_back({name + "          Default: " + format_default_value(param->default_value) , param->value});
 
+      #ifdef LABEL_RCOU_FUNCTION
       // save servo functions
       QRegExp rx("SERVO(\\d+)_FUNCTION");
       if (rx.indexIn(QString::fromStdString(name)) != -1) {
@@ -401,6 +402,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
           }
         }
       }
+      #endif
 
       total_bytes_used += fmt.length;
       msgs_read++;
@@ -601,6 +603,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
           series_name = "/" + msg_name + "/" + instance_name + "/" + field_name;
         }
         
+        #ifdef LABEL_RCOU_FUNCTION
         // label servo functions
         if (msg_name == "RCOU" || msg_name == "RCO2") {
           QRegExp re(R"(C(\d+))");
@@ -612,6 +615,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
             }
           }
         }
+        #endif
 
 
         #ifdef LABEL_WITH_UNIT
@@ -689,7 +693,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   std::printf("\n  Skipped messages:\t%d", msgs_skipped);
   std::printf("\n  Skipped bytes:\t%d from %d bytes\n\n", bytes_skipped, len);
 
-  #ifdef DEBUG_RUNTIME
+  #if defined(DEBUG_RUNTIME) && defined(LABEL_RCOU_FUNCTION)
   for (int i = 0; i < 32; i++) {
     if (i < 14) {
       std::printf("\nRCOU.C%d: %s", i + 1, _servo_function_labels[i].c_str());
