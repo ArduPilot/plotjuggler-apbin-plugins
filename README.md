@@ -41,6 +41,8 @@ This requires that you have Docker installed in your system.
     You can pass build arguments with the `--build-arg` option.
     Build arguments include:
     - `ADD_UNITS[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
+    - `ADD_LABEL_RCOU_FUNCTION[=OFF]`: Set to `ON` to enable the display the channel function next to its name.
+[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
     - `BASE_IMAGE[=ubuntu:22.04]`: Specify the OS image to build off of. It is known that using a different OS than your host OS may result in the plugin not working.
     - `PJ_TAG[=3.9.2]`: The PlotJuggler git branch or tag to use when cloing and compiling PlotJuggler.
 
@@ -116,7 +118,7 @@ Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in o
 
 This plugin allows the units of logged fields to be appended to the logged field names.
 
-**Be careful:**  
+**Be careful:**
 
 If you created a PlotJuggler layout without units and then enable the units, the layout will be unusable and vice-versa.
 This is because the units are part of the field name; hence, the original field name no longer exists.
