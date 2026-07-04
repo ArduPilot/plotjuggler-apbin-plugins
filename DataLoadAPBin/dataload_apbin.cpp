@@ -372,7 +372,13 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     if ( memcmp(fmt.name, "MSG", 3) == 0 )
     {
       const auto* msg = reinterpret_cast<const log_message*>(&buf[total_bytes_used]);
-      _status_texts.push_back({msg->time_us, 0, msg->msg});
+      // Check if the statustext string is null-terminated. It will not be
+      // in the case where the name fills in the full 64-char space.
+      const void* msg_nul = memchr(msg->msg, '\0', sizeof(msg->msg));
+      const size_t msg_length = msg_nul != nullptr
+          ? static_cast<const char*>(msg_nul) - msg->msg
+          : sizeof(msg->msg);
+      _status_texts.push_back({msg->time_us, 0, std::string(msg->msg, msg_length)});
 
       total_bytes_used += fmt.length;
       msgs_read++;
@@ -381,7 +387,13 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     if ( memcmp(fmt.name, "PARM", 4) == 0 )
     {
       const auto* param = reinterpret_cast<const log_param*>(&buf[total_bytes_used]);
-      std::string name = std::string(param->name);
+      // Check if the parameter name string is null-terminated. It will not be
+      // in the case where the name fills in the full 16-char space.
+      const void* name_nul = memchr(param->name, '\0', sizeof(param->name));
+      const size_t name_length = name_nul != nullptr
+          ? static_cast<const char*>(name_nul) - param->name
+          : sizeof(param->name);
+      std::string name = std::string(param->name, name_length);
       _parameters.push_back({name + "          Default: " + format_default_value(param->default_value) , param->value});
 
       #ifdef LABEL_RCOU_FUNCTION
