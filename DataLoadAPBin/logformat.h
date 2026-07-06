@@ -158,13 +158,6 @@ struct log_param {
     float default_value;
 });
 
-PACKED_STRUCT(
-struct log_message {
-    LOG_PACKET_HEADER;
-    uint64_t time_us;
-    char msg[64];
-});
-
 struct Parameter
 {
   std::string name;

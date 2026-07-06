@@ -378,14 +378,24 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     }
     if ( memcmp(fmt.name, "MSG", 3) == 0 )
     {
-      const auto* msg = reinterpret_cast<const log_message*>(&buf[total_bytes_used]);
-      // Check if the statustext string is null-terminated. It will not be
-      // in the case where the name fills in the full 64-char space.
-      const void* msg_nul = memchr(msg->msg, '\0', sizeof(msg->msg));
+      // ArduPilot changed the MSG format from "QZ" (TimeUS,Message) to
+      // "QBBZ" (TimeUS,ID,Seq,Message), inserting two bytes before the text.
+      // Locate the fields by name from the FMT so both layouts parse correctly.
+      const uint32_t time_offset = get_field_byte_offset(type, "TimeUS");
+      const uint32_t msg_offset  = get_field_byte_offset(type, "Message");
+
+      uint64_t time_us = 0;
+      memcpy(&time_us, &buf[total_bytes_used + time_offset], sizeof(time_us));
+
+      // The Message field spans the remainder of the record. It is only
+      // null-terminated if the text is shorter than the field width.
+      const char* msg_text = reinterpret_cast<const char*>(&buf[total_bytes_used + msg_offset]);
+      const size_t msg_field_size = fmt.length - msg_offset;
+      const void* msg_nul = memchr(msg_text, '\0', msg_field_size);
       const size_t msg_length = msg_nul != nullptr
-          ? static_cast<const char*>(msg_nul) - msg->msg
-          : sizeof(msg->msg);
-      _status_texts.push_back({msg->time_us, 0, std::string(msg->msg, msg_length)});
+          ? static_cast<const char*>(msg_nul) - msg_text
+          : msg_field_size;
+      _status_texts.push_back({time_us, 0, std::string(msg_text, msg_length)});
 
       total_bytes_used += fmt.length;
       msgs_read++;
