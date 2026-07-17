@@ -466,16 +466,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     process_units_ms += (process_units_end - process_units_start);
   #endif
 
-  // -------------------- apply multipliers -------------------- //
-  #ifdef DEBUG_RUNTIME
-    auto apply_mult_start = std::chrono::high_resolution_clock::now();
-  #endif
-  apply_multipliers();
-  #ifdef DEBUG_RUNTIME
-    auto apply_mult_end = std::chrono::high_resolution_clock::now();
-    apply_mult_ms += (apply_mult_end - apply_mult_start);
-  #endif
-
   // -------------------- apply timesync -------------------- //
   #ifdef DEBUG_RUNTIME
     auto apply_tsync_start = std::chrono::high_resolution_clock::now();
@@ -484,6 +474,16 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #ifdef DEBUG_RUNTIME
     auto apply_tsync_end = std::chrono::high_resolution_clock::now();
     apply_tsync_ms += (apply_tsync_end - apply_tsync_start);
+  #endif
+
+  // -------------------- apply multipliers -------------------- //
+  #ifdef DEBUG_RUNTIME
+    auto apply_mult_start = std::chrono::high_resolution_clock::now();
+  #endif
+  apply_multipliers();
+  #ifdef DEBUG_RUNTIME
+    auto apply_mult_end = std::chrono::high_resolution_clock::now();
+    apply_mult_ms += (apply_mult_end - apply_mult_start);
   #endif
 
   #ifdef DEBUG_MESSAGES
@@ -1066,28 +1066,22 @@ namespace
     std::map<std::string, std::map<int8_t,
         std::vector<std::pair<std::string, std::vector<double>>>>>& messages_map,
     const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx,
-    double time_offset_sec)
+    double time_offset_us)
   {
     for (auto& [msg_name, instances_map] : messages_map)
     {
       const auto msg_fields_it = field_name2idx.find(msg_name);
-      if (msg_fields_it == field_name2idx.end())
-      {
-        continue;
-      }
+      if (msg_fields_it == field_name2idx.end()) continue;
 
       const auto time_idx_it = msg_fields_it->second.find("TimeUS");
-      if (time_idx_it == msg_fields_it->second.end())
-      {
-        continue;
-      }
+      if (time_idx_it == msg_fields_it->second.end()) continue;
       const auto& msg_time_idx = time_idx_it->second;
 
       for (auto& [instance_id, msg_data] : instances_map)
       {
         std::vector<double>& timestamps = msg_data[msg_time_idx].second;
         std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
-                        [time_offset_sec](double t) { return t + time_offset_sec; });
+                        [time_offset_us](double t) { return t + time_offset_us; });
       }
     }
   }
@@ -1134,11 +1128,11 @@ void DataLoadAPBIN::apply_timesync(void)
 
   const double gps_week    = week_vec[*valid_sample_idx];
   const double gps_week_ms = ms_vec[*valid_sample_idx];
-
-  const double log_time_sec = time_vec[*valid_sample_idx];
+  const double log_time_sec = time_vec[*valid_sample_idx] / 1e6;
 
   const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_ms);
   const double time_offset_sec = unix_time_sec - log_time_sec;
+  const double time_offset_us = time_offset_sec * 1e6;
 
-  shift_all_timestamps(messages_map, field_name2idx, time_offset_sec);
+  shift_all_timestamps(messages_map, field_name2idx, time_offset_us);
 }
