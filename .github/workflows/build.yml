@@ -1,0 +1,201 @@
+name: Build plugin
+
+on:
+  push:
+    branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Single source of truth: both the clone and the cache key derive from this.
+  PJ_TAG: '3.9.2'
+
+jobs:
+  # Build PlotJuggler once per OS and cache the install tree. Hoisted out of the
+  # plugin matrix so it is not rebuilt once per build configuration.
+  plotjuggler:
+    name: PlotJuggler (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # A macos-14 leg belongs here as well; deferred to a follow-up PR.
+        os: [ubuntu-24.04, windows-2022]
+
+    steps:
+      # GITHUB_WORKSPACE is backslash-separated on Windows; normalise it so a
+      # single bash step can hand the path to cmake on every platform.
+      - name: Resolve install prefix
+        shell: bash
+        run: echo "PJ_INSTALL=${GITHUB_WORKSPACE//\\//}/pj_install" >> "$GITHUB_ENV"
+
+      - name: Cache PlotJuggler install
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: pj_install
+          key: ${{ runner.os }}-plotjuggler-${{ env.PJ_TAG }}
+
+      - name: Install PlotJuggler dependencies
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git ninja-build \
+            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
+            libqt5x11extras5-dev libprotoc-dev libzmq3-dev liblz4-dev libzstd-dev
+
+      - name: Install Qt
+        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: 'win64_msvc2019_64'
+
+      - name: Clone PlotJuggler
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: git clone --depth 1 --branch "$PJ_TAG" https://github.com/facontidavide/PlotJuggler.git plotjuggler
+
+      - name: Configure PlotJuggler
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        # CMAKE_POLICY_VERSION_MINIMUM is insurance: PlotJuggler 3.9.2 ships
+        # third-party directories declaring cmake_minimum_required(VERSION 3.0),
+        # which CMake 4 rejects outright. Ignored by CMake older than 3.31.
+        run: |
+          cmake -S plotjuggler -B pj_build \
+            -DCMAKE_INSTALL_PREFIX="$PJ_INSTALL" \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build & install PlotJuggler
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: cmake --build pj_build --config RelWithDebInfo --target install --parallel "$(nproc || echo 2)"
+
+  plugin:
+    name: ${{ matrix.config.name }} (${{ matrix.os }})
+    needs: plotjuggler
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Never let one configuration mask the others.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+        config:
+          - name: units
+            units: 'ON'
+            rcou: 'OFF'
+          - name: units-rcou
+            units: 'ON'
+            rcou: 'ON'
+          - name: plain
+            units: 'OFF'
+            rcou: 'OFF'
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v7
+
+      - name: Resolve install prefix
+        shell: bash
+        run: echo "PJ_INSTALL=${GITHUB_WORKSPACE//\\//}/pj_install" >> "$GITHUB_ENV"
+
+      # The plotjuggler job has already populated this key, so a miss means
+      # something is wrong and should fail loudly rather than rebuild silently.
+      - name: Restore PlotJuggler install
+        uses: actions/cache/restore@v6
+        with:
+          path: pj_install
+          key: ${{ runner.os }}-plotjuggler-${{ env.PJ_TAG }}
+          fail-on-cache-miss: true
+
+      - name: Install plugin dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake \
+            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
+            libqt5x11extras5-dev
+
+      - name: Install Qt
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: 'win64_msvc2019_64'
+
+      - name: Configure plugin
+        shell: bash
+        run: |
+          cmake -S . -B build \
+            -Dplotjuggler_DIR="$PJ_INSTALL/lib/cmake/plotjuggler" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DADD_UNITS=${{ matrix.config.units }} \
+            -DADD_RCOU_FUNCTION_LABELS=${{ matrix.config.rcou }}
+
+      - name: Build plugin
+        shell: bash
+        run: cmake --build build --config Release --parallel "$(nproc || echo 2)"
+
+      - name: Install plugin
+        shell: bash
+        run: cmake --install build --prefix plugin_install --config Release
+
+      - name: Upload plugin artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: DataAPBin-${{ matrix.os }}-${{ matrix.config.name }}
+          path: plugin_install/
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: plugin
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@v7
+
+      - name: Download all plugin artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      # Each artifact holds a single shared library under bin/. Flatten them
+      # into uniquely named assets, keeping the real extension so a downloaded
+      # asset is still recognisable as a plugin.
+      - name: Collect release assets
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          for dir in artifacts/*/; do
+            variant="$(basename "$dir")"
+            variant="${variant#DataAPBin-}"
+            # -print -quit rather than piping to head: under `set -o pipefail` a
+            # closed pipe would make find fail the whole step.
+            lib="$(find "$dir" -type f \( -name '*.so' -o -name '*.dll' -o -name '*.dylib' \) -print -quit)"
+            if [ -z "$lib" ]; then
+              echo "No plugin library found in $dir" >&2
+              exit 1
+            fi
+            case "$lib" in
+              *.dll) cp "$lib" "assets/DataAPBin-$variant.dll" ;;
+              *)     cp "$lib" "assets/libDataAPBin-$variant.${lib##*.}" ;;
+            esac
+          done
+          ls -l assets
+
+      - name: Create draft release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          files: assets/*
+          fail_on_unmatched_files: true
