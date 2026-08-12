@@ -17,6 +17,10 @@
 #include <QtPlugin>
 #include "PlotJuggler/dataloader_base.h"
 #include "logformat.h"
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace PJ;
 

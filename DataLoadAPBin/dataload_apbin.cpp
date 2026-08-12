@@ -20,10 +20,17 @@
 #include <QDir>
 #include <QCoreApplication>
 #include "LogMessageDescriptions.h"
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <iomanip>
+#include <map>
+#include <optional>
+#include <set>
 #include <sstream>
+#include <string>
+#include <vector>
 #include <cstring>
 #include <cctype>
 
