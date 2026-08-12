@@ -14,6 +14,8 @@
 #pragma once
 #include <cstdint>
 #include <QMetaType>
+#include <map>
+#include <string>
 #include <vector>
 
 // PACKED_STRUCT macro cross-platform
@@ -35,8 +37,6 @@ If the ArduPilot source code for the logging mechanism is changed it may be nece
 to update the content of this file!
 */
 
-
-
 /*
 An ArduPilot logfile consists of messages.
 The format message (FMT) is the base message which defines the content of any other message.
@@ -50,16 +50,12 @@ A message is structured as follows:
     - Usually, the first field of a message is time
 */
 
-
-
 /*
   The format message (FMT) has a hardcoded message id of 128
     - file: libraries/AP_Logger/LogStructure.h (commit: b80cc9a)
     - line: 1446
 */
 static constexpr uint8_t LOG_FORMAT_MSG = 128;
-
-
 
 /*
   These are two bytes for the header identification sequence
@@ -69,8 +65,6 @@ static constexpr uint8_t LOG_FORMAT_MSG = 128;
 static constexpr uint8_t HEAD_BYTE1 = 0xA3;    // Decimal 163
 static constexpr uint8_t HEAD_BYTE2 = 0x95;    // Decimal 149
 
-
-
 /*
   Message header definition
     - file: libraries/AP_Logger/LogStructure.h (commit: b80cc9a)
@@ -79,8 +73,6 @@ static constexpr uint8_t HEAD_BYTE2 = 0x95;    // Decimal 149
 #define LOG_PACKET_HEADER	       uint8_t head1, head2, msgid;
 //#define LOG_PACKET_HEADER_INIT(id) head1 : HEAD_BYTE1, head2 : HEAD_BYTE2, msgid : id
 #define LOG_PACKET_HEADER_LEN 3 // bytes required for LOG_PACKET_HEADER
-
-
 
 /*
   If you need to change this section, please also fix dataload_apbin.cpp (handle_message_received)!
@@ -112,7 +104,6 @@ const std::map<char, uint16_t> format_types =
   {'Q', sizeof(uint64_t)}
 };
 
-
 /*
   Based on:
     - file: libraries/AP_Logger/LogStructure.h (commit: b80cc9a)
@@ -123,8 +114,6 @@ static constexpr uint8_t MAX_FORMAT_SIZE = 17-1;        // max 16 fields per mes
 static constexpr uint8_t MAX_LABELS_SIZE = 65-1;        // max 16 fields per message, field names max 64 chars in total
 static constexpr uint8_t MAX_UNITS_SIZE = 17-1;         // max 16 fields per message
 static constexpr uint8_t MAX_MULTIPLIERS_SIZE = 17-1;   // max 16 fields per message
-
-
 
 /*
   FMT - format
@@ -144,8 +133,6 @@ struct log_Format {
   char labels[MAX_LABELS_SIZE];   // label (field names)    example: "TimeUS,Tar,Act,Err,P,I,D,FF,Dmod,SRate,Limit"
 });
 
-
-
 /*
   FMTU - format unit
   - The FMTU-message defines units and multipliers for the fields of a message
@@ -161,7 +148,6 @@ struct log_Format_Units {
   char units[MAX_UNITS_SIZE];               // units        example: "s----------"
   char multipliers[MAX_MULTIPLIERS_SIZE];   // multipliers  example: "F----------"
 });
-
 
 PACKED_STRUCT(
 struct log_param {
