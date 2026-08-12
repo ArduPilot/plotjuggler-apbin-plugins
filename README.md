@@ -61,7 +61,9 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
     sudo apt -y install qtbase5-dev libqt5svg5-dev
     ```
 
-2. If you want the units to be displayed in PlotJuggler (read at the end), you need to edit `dataload_apbin.cpp` and activate `#define LABEL_WITH_UNIT`.  
+2. The optional features are selected with cmake options, both `OFF` by default:
+    - `-DADD_UNITS=ON` displays the units of the logged fields (read at the end).
+    - `-DADD_RCOU_FUNCTION_LABELS=ON` displays the channel function next to its name.
 
 3. Compile using cmake:
 
@@ -73,6 +75,23 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
     make
     sudo make install
     ```
+
+### Testing a built plugin
+
+`tests/` holds a headless check that loads a plugin the way PlotJuggler does and
+parses the small log in `tests/logs/`, without starting the GUI.
+It also verifies that the cmake options above actually reached the binary, and on
+Linux reports whether the plugin's libstdc++ requirement is satisfied by your
+system — which is what catches a plugin built on a newer distro than the one
+running it.
+
+```bash
+cmake -S tests -B tests/build -DPJ_INCLUDE_DIR="$PJ_WS/install/include"
+cmake --build tests/build
+./tests/test_plugin.sh build/libDataAPBin.so
+```
+
+Point it at a plugin downloaded from CI or a release to check it before use.
 
 ### Notes for building on MacOS
 
