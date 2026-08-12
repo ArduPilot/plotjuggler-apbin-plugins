@@ -1086,11 +1086,12 @@ void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
   };
 
   // First, parse embedded XMLs compiled into the library (if present).
-  // Use a sanity check on the embedded C-string rather than relying on sizeof.
-  if (kEmbeddedLogMessagesXml[0] != '\0')
+  // Use a sanity check on the embedded string rather than relying on sizeof.
+  const std::string& embedded = GetEmbeddedLogMessagesXml();
+  if (!embedded.empty())
   {
-    const char* emb = kEmbeddedLogMessagesXml;
-    size_t emb_len = std::strlen(emb);
+    const char* emb = embedded.c_str();
+    size_t emb_len = embedded.size();
     // require a minimal length and at least one '<' character after skipping whitespace
     if (emb_len > 10)
     {
@@ -1098,7 +1099,7 @@ void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
       while (i < emb_len && std::isspace(static_cast<unsigned char>(emb[i]))) ++i;
       if (i < emb_len && emb[i] == '<')
       {
-        QXmlStreamReader xmlEmbedded(QString::fromUtf8(emb));
+        QXmlStreamReader xmlEmbedded(QString::fromUtf8(emb, static_cast<int>(emb_len)));
         parseXml(xmlEmbedded);
         if (xmlEmbedded.hasError())
         {
