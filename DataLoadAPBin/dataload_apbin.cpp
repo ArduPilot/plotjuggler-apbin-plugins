@@ -40,8 +40,8 @@
 //#define DEBUG_MULTIPLIERS
 //#define DEBUG_UNITS
 
-// Config
-#define LABEL_WITH_UNIT
+// LABEL_WITH_UNIT and LABEL_RCOU_FUNCTION are set by the build: see the
+// ADD_UNITS and ADD_RCOU_FUNCTION_LABELS options in CMakeLists.txt.
 
 bool is_nearly(double val, int val2)
 {
