@@ -12,16 +12,24 @@ env:
   PJ_TAG: '3.9.2'
 
 jobs:
-  # Build PlotJuggler once per OS and cache the install tree. Hoisted out of the
-  # plugin matrix so it is not rebuilt once per build configuration.
+  # Build PlotJuggler once per platform and cache the install tree. Hoisted out of
+  # the plugin matrix so it is not rebuilt once per build configuration.
   plotjuggler:
-    name: PlotJuggler (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: PlotJuggler (${{ matrix.platform.label }})
+    runs-on: ${{ matrix.platform.os }}
+    container:
+      # Ubuntu is built inside a 22.04 container rather than on a 24.04 runner so
+      # the artifacts keep the older libstdc++/glibc floor: a binary built against
+      # GCC 13 needs GLIBCXX_3.4.32 and will not load on Ubuntu 22.04, while a
+      # 22.04 build loads on both. This also matches the Dockerfile exactly, so a
+      # CI failure reproduces locally with `docker build`.
+      image: ${{ matrix.platform.container || '' }}
     strategy:
       fail-fast: false
       matrix:
-        # A macos-14 leg belongs here as well; deferred to a follow-up PR.
-        os: [ubuntu-24.04, windows-2022]
+        platform:
+          - { os: ubuntu-latest, container: 'ubuntu:22.04', label: ubuntu-22.04 }
+          - { os: windows-2022, label: windows-2022 }
 
     steps:
       # GITHUB_WORKSPACE is backslash-separated on Windows; normalise it so a
@@ -30,19 +38,24 @@ jobs:
         shell: bash
         run: echo "PJ_INSTALL=${GITHUB_WORKSPACE//\\//}/pj_install" >> "$GITHUB_ENV"
 
+      # The label is part of the key because runner.os alone cannot tell a 22.04
+      # container build from a build on the runner's own newer userland.
       - name: Cache PlotJuggler install
         id: cache
         uses: actions/cache@v6
         with:
           path: pj_install
-          key: ${{ runner.os }}-plotjuggler-${{ env.PJ_TAG }}
+          key: ${{ matrix.platform.label }}-plotjuggler-${{ env.PJ_TAG }}
 
       - name: Install PlotJuggler dependencies
         if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
+        # No sudo: the container runs as root. python3 matters -- CMakeLists falls
+        # back to an empty LogMessageDescriptions.h without it, silently dropping
+        # the field tooltips from the built plugin.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake git ninja-build \
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake git ca-certificates python3 zstd \
             qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
             libqt5x11extras5-dev libprotoc-dev libzmq3-dev liblz4-dev libzstd-dev
 
@@ -76,14 +89,18 @@ jobs:
         run: cmake --build pj_build --config RelWithDebInfo --target install --parallel "$(nproc || echo 2)"
 
   plugin:
-    name: ${{ matrix.config.name }} (${{ matrix.os }})
+    name: ${{ matrix.config.name }} (${{ matrix.platform.label }})
     needs: plotjuggler
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.platform.os }}
+    container:
+      image: ${{ matrix.platform.container || '' }}
     strategy:
       # Never let one configuration mask the others.
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        platform:
+          - { os: ubuntu-latest, container: 'ubuntu:22.04', label: ubuntu-22.04 }
+          - { os: windows-2022, label: windows-2022 }
         config:
           - name: units
             units: 'ON'
@@ -96,6 +113,17 @@ jobs:
             rcou: 'OFF'
 
     steps:
+      # Before checkout, so that actions/checkout finds git and makes a real clone
+      # instead of falling back to a source tarball.
+      - name: Install plugin dependencies
+        if: runner.os == 'Linux'
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake git ca-certificates python3 zstd \
+            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
+            libqt5x11extras5-dev
+
       - name: Checkout plugin
         uses: actions/checkout@v7
 
@@ -109,17 +137,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: pj_install
-          key: ${{ runner.os }}-plotjuggler-${{ env.PJ_TAG }}
+          key: ${{ matrix.platform.label }}-plotjuggler-${{ env.PJ_TAG }}
           fail-on-cache-miss: true
-
-      - name: Install plugin dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake \
-            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
-            libqt5x11extras5-dev
 
       - name: Install Qt
         if: runner.os == 'Windows'
@@ -145,10 +164,46 @@ jobs:
         shell: bash
         run: cmake --install build --prefix plugin_install --config Release
 
+      - name: Build smoke test
+        shell: bash
+        run: |
+          cmake -S tests -B tests/build \
+            -DPJ_INCLUDE_DIR="$PJ_INSTALL/include" \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build tests/build --config Release --parallel "$(nproc || echo 2)"
+
+      # Loads the plugin exactly as PlotJuggler does and parses a real log, so a
+      # plugin that builds but cannot be loaded fails here instead of in a user's
+      # hands. The --expect-* flags additionally assert that this job's CMake
+      # options actually reached the binary, which a build log cannot tell you.
+      # offscreen because CI has no display.
+      - name: Smoke test plugin
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          if [ -x tests/build/pj_plugin_smoketest ]; then
+            smoketest=tests/build/pj_plugin_smoketest
+          else
+            smoketest=tests/build/Release/pj_plugin_smoketest.exe
+          fi
+          plugin="$(find plugin_install -type f \( -name '*.so' -o -name '*.dll' \) -print -quit)"
+          # --verify is unconditional so that the all-OFF 'plain' configuration is
+          # asserted too, not merely reported.
+          expect=(--verify)
+          if [ "${{ matrix.config.units }}" = "ON" ]; then
+            expect+=(--expect-units)
+          fi
+          if [ "${{ matrix.config.rcou }}" = "ON" ]; then
+            expect+=(--expect-rcou)
+          fi
+          echo "Testing $plugin ${expect[*]}"
+          "$smoketest" "$plugin" tests/logs/00000001.BIN "${expect[@]}"
+
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v7
         with:
-          name: DataAPBin-${{ matrix.os }}-${{ matrix.config.name }}
+          name: DataAPBin-${{ matrix.platform.label }}-${{ matrix.config.name }}
           path: plugin_install/
           if-no-files-found: error
 

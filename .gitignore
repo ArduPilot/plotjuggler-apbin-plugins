@@ -32,3 +32,4 @@
 *.app
 /CMakeLists.txt.user
 build/*
+tests/build/
