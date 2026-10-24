@@ -95,16 +95,30 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     return false;
   }
 
-  const QByteArray file_array = file.readAll();
-  const int32_t file_size = file_array.size();
+  const qint64 file_size = file.size();
+  const uint8_t* buf = reinterpret_cast<const uint8_t*>(file.map(0, file_size));
+  if (!buf)
+  {
+    return false;
+  }
+  const uint64_t len = static_cast<uint64_t>(file_size);
+  uint64_t total_bytes_used = 0;
 
-  const uint8_t* buf = reinterpret_cast<const uint8_t*>(file_array.data());
-  const uint32_t len = file_array.size();
-  uint32_t total_bytes_used = 0;
+  // Progress box for large file
+  QProgressDialog progress_dialog;
+  progress_dialog.setLabelText("Loading ArduPilot logfile... please wait");
+  progress_dialog.setWindowModality(Qt::ApplicationModal);
+  progress_dialog.setRange(0, 100);
+  progress_dialog.setAutoClose(true);
+  progress_dialog.setAutoReset(true);
+  progress_dialog.show();
 
-  uint32_t bytes_skipped{ 0 };
-  uint32_t msgs_skipped{ 0 };
-  uint32_t msgs_read{ 0 };
+  int progress{ 0 };
+  int progress_update{ 0 };
+
+  uint64_t bytes_skipped{ 0 };
+  uint64_t msgs_skipped{ 0 };
+  uint64_t msgs_read{ 0 };
 
   QElapsedTimer timer;
   timer.start();
@@ -150,7 +164,7 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       #endif
 
       // check if we don't reach the end
-      if ((uint32_t)(len - total_bytes_used) < sizeof(struct log_Format))
+      if ((len - total_bytes_used) < sizeof(struct log_Format))
       {
         bytes_skipped += len - total_bytes_used;
         break;
@@ -499,16 +513,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     process_units_ms += (process_units_end - process_units_start);
   #endif
 
-  // -------------------- apply multipliers -------------------- //
-  #ifdef DEBUG_RUNTIME
-    auto apply_mult_start = std::chrono::high_resolution_clock::now();
-  #endif
-  apply_multipliers();
-  #ifdef DEBUG_RUNTIME
-    auto apply_mult_end = std::chrono::high_resolution_clock::now();
-    apply_mult_ms += (apply_mult_end - apply_mult_start);
-  #endif
-
   // -------------------- apply timesync -------------------- //
   #ifdef DEBUG_RUNTIME
     auto apply_tsync_start = std::chrono::high_resolution_clock::now();
@@ -517,6 +521,16 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #ifdef DEBUG_RUNTIME
     auto apply_tsync_end = std::chrono::high_resolution_clock::now();
     apply_tsync_ms += (apply_tsync_end - apply_tsync_start);
+  #endif
+
+  // -------------------- apply multipliers -------------------- //
+  #ifdef DEBUG_RUNTIME
+    auto apply_mult_start = std::chrono::high_resolution_clock::now();
+  #endif
+  apply_multipliers();
+  #ifdef DEBUG_RUNTIME
+    auto apply_mult_end = std::chrono::high_resolution_clock::now();
+    apply_mult_ms += (apply_mult_end - apply_mult_start);
   #endif
 
   #ifdef DEBUG_MESSAGES
@@ -718,9 +732,9 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
   qDebug() << "The loading operation took" << timer.elapsed() << "milliseconds";
 
-  std::printf("\n  Read messages:\t%d", msgs_read);
-  std::printf("\n  Skipped messages:\t%d", msgs_skipped);
-  std::printf("\n  Skipped bytes:\t%d from %d bytes\n\n", bytes_skipped, len);
+  std::printf("\n  Read messages:\t%lu", static_cast<unsigned long long>(msgs_read));
+  std::printf("\n  Skipped messages:\t%lu", static_cast<unsigned long long>(msgs_skipped));
+  std::printf("\n  Skipped bytes:\t%lu from %lu bytes\n\n", static_cast<unsigned long long>(bytes_skipped, len));
 
   #if defined(DEBUG_RUNTIME) && defined(LABEL_RCOU_FUNCTION)
   for (int i = 0; i < 32; i++) {
@@ -1130,36 +1144,59 @@ void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
 
 void DataLoadAPBIN::apply_multipliers(void)
 {
-  // Go through all messages, instances, fields and apply the correct multiplier from FMTU and MULT
+  // TimeUS is always stored by AP_Logger as raw microseconds, for every
+  // message, regardless of whether *this* log happens to contain an FMTU
+  // record for that message type. Some logs (like this one) only emit FMTU
+  // for a handful of custom message types and never for standard ones
+  // (GPS, IMU, BARO...). apply_timesync()/shift_all_timestamps() assume
+  // TimeUS is already in seconds, so leaving it in raw microseconds for
+  // any FMTU-less message silently produces timestamps wrong by decades.
+  // Normalize it here unconditionally, before the FMTU-dependent pass.
+  static constexpr double TIMEUS_TO_SECONDS = 1e-6;
+  for (auto& msg_it : messages_map)
+  {
+    for (auto& inst_it : msg_it.second)
+    {
+      for (auto& field : inst_it.second)
+      {
+        if (field.first == "TimeUS")
+        {
+          std::vector<double>& field_data = field.second;
+          std::transform(field_data.begin(), field_data.end(), field_data.begin(),
+                          std::bind(std::multiplies<double>(), std::placeholders::_1, TIMEUS_TO_SECONDS));
+          break; // one TimeUS field per message
+        }
+      }
+    }
+  }
 
-  // iterate through messages
+  // Go through all messages, instances, fields and apply the correct multiplier from FMTU and MULT
   for (auto& msg_it : messages_map)
   {
     const std::string& msg_name = msg_it.first;
-
-    // get message id for message name
     const uint8_t& msg_id = msg_name2id[msg_name];
 
-    // check if FMTU exists
     if ( !has_fmtu[msg_id] )
     {
       std::fprintf(stderr, "WARNING: No FMTU for message %s found. Can not apply multipliers!\n", msg_name.c_str());
       continue;
     }
 
-    // iterate through instances
     auto& instances_map = msg_it.second;
     for (auto& inst_it : instances_map)
     {
       message_data& msg_data = inst_it.second;
-
-      // iterate through fields
       for (int idx = 0; idx < msg_data.size(); idx++)
       {
-        // get multiplier descriptor char
-        const char& field_multiplier_char = format_units[msg_id].multipliers[idx];
+        // Already normalized above -- and must never be scaled again even
+        // for the few message types that DO have proper FMTU (their
+        // multiplier char for TimeUS is 'F' == 1e-6, same as above).
+        if (msg_data[idx].first == "TimeUS")
+        {
+          continue;
+        }
 
-        // get multiplier double
+        const char& field_multiplier_char = format_units[msg_id].multipliers[idx];
         const auto multiplier_it = multipliers.find(field_multiplier_char);
         if ( multiplier_it == multipliers.end() )
         {
@@ -1167,13 +1204,10 @@ void DataLoadAPBIN::apply_multipliers(void)
           continue;
         }
         const double field_multiplier = multiplier_it->second;
-
-        // check if multiplier is 0 or 1
         if ( is_nearly(field_multiplier, 0) || is_nearly(field_multiplier, 1) )
         {
           continue;
         }
-
         std::vector<double>& field_data = msg_data[idx].second;
         std::transform(field_data.begin(), field_data.end(), field_data.begin(), std::bind(std::multiplies<double>(), std::placeholders::_1, field_multiplier));
       }
@@ -1184,17 +1218,15 @@ void DataLoadAPBIN::apply_multipliers(void)
 
 double DataLoadAPBIN::gps_to_unix_time(double gps_week, double gps_ms_of_week)
 {
-    static constexpr double SECONDS_PER_WEEK      = 60 * 60 * 24 * 7;   // 60 * 60 * 24 * 7
-    static constexpr double MS_PER_SECOND         = 1000.0;
-    static constexpr double GPS2UNIX_TIME_OFFSET  = 315964800.0; // Unix epoch vs GPS epoch
-    static constexpr double GPS2UNIX_LEAP_SECONDS = -18.0;       // Current leap seconds
+    static constexpr double SECONDS_PER_WEEK = 604800.0;
+    static constexpr double MS_PER_SECOND = 1000.0;
+    static constexpr double GPS_TO_UNIX_OFFSET = 315964800.0; // 1970-01-01 to 1980-01-06
+    static constexpr double GPS_MINUS_UTC = 18.0;             // GPS is ahead of UTC
 
-    const double gps_week_seconds = gps_ms_of_week / MS_PER_SECOND;
-
-    return (gps_week * SECONDS_PER_WEEK)
-         + gps_week_seconds
-         + GPS2UNIX_TIME_OFFSET
-         + GPS2UNIX_LEAP_SECONDS;
+    return gps_week * SECONDS_PER_WEEK
+         + gps_ms_of_week / MS_PER_SECOND
+         + GPS_TO_UNIX_OFFSET
+         - GPS_MINUS_UTC;
 }
 
 namespace
@@ -1208,12 +1240,9 @@ namespace
     uint8_t week_idx;
     uint8_t ms_idx;
     uint8_t nsats_idx;
+    uint8_t status_idx;
   };
 
-  // Resolves the index of each required GPS field by name.
-  // Returns std::nullopt (and prints a clear message) if any field is
-  // missing, instead of silently defaulting to index 0 via
-  // std::map::operator[].
   std::optional<GpsFieldIndices> resolve_gps_field_indices(
       const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx)
   {
@@ -1236,38 +1265,45 @@ namespace
       return it->second;
     };
 
-    const auto time_idx  = find_field("TimeUS");
-    const auto week_idx  = find_field("GWk");
-    const auto ms_idx    = find_field("GMS");
-    const auto nsats_idx = find_field("NSats");
+    const auto time_idx   = find_field("TimeUS");
+    const auto week_idx   = find_field("GWk");
+    const auto ms_idx     = find_field("GMS");
+    const auto nsats_idx  = find_field("NSats");
+    const auto status_idx = find_field("Status");
 
-    if (!time_idx || !week_idx || !ms_idx || !nsats_idx)
+    if (!time_idx || !week_idx || !ms_idx || !nsats_idx || !status_idx)
     {
       return std::nullopt;
     }
 
-    return GpsFieldIndices{ *time_idx, *week_idx, *ms_idx, *nsats_idx };
+    return GpsFieldIndices{ *time_idx, *week_idx, *ms_idx, *nsats_idx, *status_idx };
   }
 
-  // Scans the logged GPS timeline for the first sample with a usable fix:
-  // enough satellites, and non-zero TimeUS/GWk/GMS. GWk in particular must be
-  // checked, since a sample can report NSats > 4 and non-zero TimeUS/GMS
-  // while GWk is still 0 (week number not yet resolved) - accepting that
-  // sample would anchor the whole log to the GPS epoch (1980-01-06).
+  // Scans the logged GPS timeline for the first sample with an actual usable
+  // fix. NSats/GWk/GMS being non-zero is NOT sufficient on its own: a receiver
+  // can report tracked satellites and even a decoded week number while
+  // Status still reports "no lock" (GPS.Status == 1, NONE) during the normal
+  // acquisition/TTFF window - GMS in that state can be small/unconverged,
+  // which anchors the whole log to a bogus, too-early moment. Requiring
+  // Status >= FIX_3D ensures we only trust a sample the GPS driver itself
+  // considers a real fix.
   std::optional<size_t> find_first_valid_gps_sample(
       const std::vector<double>& time_vec,
       const std::vector<double>& week_vec,
       const std::vector<double>& ms_vec,
       const std::vector<double>& nsats_vec,
-      double min_nsats)
+      const std::vector<double>& status_vec,   // NEW
+      double min_nsats,
+      double min_status)                       // NEW
   {
     for (size_t i = 0; i < time_vec.size(); ++i)
     {
-      if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() &&
-          nsats_vec[i] >= min_nsats &&
-          time_vec[i]  != 0.0 &&
-          week_vec[i]  > 0.0  &&
-          ms_vec[i]    > 0.0)
+      if (i < nsats_vec.size() && i < week_vec.size() && i < ms_vec.size() && i < status_vec.size() &&
+          nsats_vec[i]  >= min_nsats &&
+          status_vec[i] >= min_status &&
+          time_vec[i]   != 0.0 &&
+          week_vec[i]   > 0.0  &&
+          ms_vec[i]     > 0.0)
       {
         return i;
       }
@@ -1279,28 +1315,22 @@ namespace
     std::map<std::string, std::map<int8_t,
         std::vector<std::pair<std::string, std::vector<double>>>>>& messages_map,
     const std::map<std::string, std::map<std::string, uint8_t>>& field_name2idx,
-    double time_offset_sec)
+    double time_offset_us)
   {
     for (auto& [msg_name, instances_map] : messages_map)
     {
       const auto msg_fields_it = field_name2idx.find(msg_name);
-      if (msg_fields_it == field_name2idx.end())
-      {
-        continue;
-      }
+      if (msg_fields_it == field_name2idx.end()) continue;
 
       const auto time_idx_it = msg_fields_it->second.find("TimeUS");
-      if (time_idx_it == msg_fields_it->second.end())
-      {
-        continue;
-      }
+      if (time_idx_it == msg_fields_it->second.end()) continue;
       const auto& msg_time_idx = time_idx_it->second;
 
       for (auto& [instance_id, msg_data] : instances_map)
       {
         std::vector<double>& timestamps = msg_data[msg_time_idx].second;
         std::transform(timestamps.begin(), timestamps.end(), timestamps.begin(),
-                        [time_offset_sec](double t) { return t + time_offset_sec; });
+                        [time_offset_us](double t) { return t + time_offset_us; });
       }
     }
   }
@@ -1310,6 +1340,7 @@ namespace
 void DataLoadAPBIN::apply_timesync(void)
 {
   static constexpr double MIN_VALID_NSATS = 4;
+  static constexpr double MIN_VALID_STATUS = 3; // GPS_FIX_TYPE::FIX_3D or better
 
   const auto msg_it = messages_map.find("GPS");
   if (msg_it == messages_map.end() || msg_it->second.empty())
@@ -1331,9 +1362,12 @@ void DataLoadAPBIN::apply_timesync(void)
   const auto& week_vec  = first_gps_instance.at(field_indices->week_idx).second;
   const auto& ms_vec    = first_gps_instance.at(field_indices->ms_idx).second;
   const auto& nsats_vec = first_gps_instance.at(field_indices->nsats_idx).second;
+  const auto& status_vec = first_gps_instance.at(field_indices->status_idx).second;
 
   const auto valid_sample_idx =
-      find_first_valid_gps_sample(time_vec, week_vec, ms_vec, nsats_vec, MIN_VALID_NSATS);
+      find_first_valid_gps_sample(time_vec, week_vec, ms_vec, nsats_vec, status_vec,
+                                   MIN_VALID_NSATS, MIN_VALID_STATUS);
+
 
   if (!valid_sample_idx)
   {
@@ -1343,11 +1377,11 @@ void DataLoadAPBIN::apply_timesync(void)
 
   const double gps_week    = week_vec[*valid_sample_idx];
   const double gps_week_ms = ms_vec[*valid_sample_idx];
-
-  const double log_time_sec = time_vec[*valid_sample_idx];
+  const double log_time_sec = time_vec[*valid_sample_idx] / 1e6;
 
   const double unix_time_sec   = gps_to_unix_time(gps_week, gps_week_ms);
   const double time_offset_sec = unix_time_sec - log_time_sec;
+  const double time_offset_us = time_offset_sec * 1e6;
 
   // Expose the offset for the status-text / parameter / message-timeline series
   _start_plot_time = log_time_sec;
