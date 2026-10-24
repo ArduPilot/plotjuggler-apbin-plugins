@@ -26,13 +26,14 @@ RUN cmake -S src/PlotJuggler -B build/PlotJuggler -DCMAKE_INSTALL_PREFIX=install
 # Compile the plugin
 ###############################################################################
 ARG ADD_UNITS=OFF
+ARG ADD_RCOU_FUNCTION_LABELS=OFF
 
 COPY --link . /apbin_plugin
 
 WORKDIR /apbin_plugin/build
 # Ensure a fresh build folder
 RUN rm -Rf * \
-    && cmake -Dplotjuggler_DIR="/plotjuggler_ws/install/lib/cmake/plotjuggler" -DADD_UNITS=${ADD_UNITS} .. \
+    && cmake -Dplotjuggler_DIR="/plotjuggler_ws/install/lib/cmake/plotjuggler" -DADD_UNITS=${ADD_UNITS} -DADD_RCOU_FUNCTION_LABELS=${ADD_RCOU_FUNCTION_LABELS} .. \
     && make -j"$(nproc)" \
     && make install \
     && mkdir /artifacts \

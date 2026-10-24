@@ -20,7 +20,7 @@ If you wish to build `plotjuggler-apbin-plugin` follow these steps.
 ```
 git clone https://github.com/ArduPilot/plotjuggler-apbin-plugins
 ```
-    
+
 ### 2a. Compile via Docker
 
 This requires that you have Docker installed in your system.
@@ -41,6 +41,8 @@ This requires that you have Docker installed in your system.
     You can pass build arguments with the `--build-arg` option.
     Build arguments include:
     - `ADD_UNITS[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
+    - `ADD_RCOU_FUNCTION_LABELS[=OFF]`: Set to `ON` to enable the display the channel function next to its name.
+[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
     - `BASE_IMAGE[=ubuntu:22.04]`: Specify the OS image to build off of. It is known that using a different OS than your host OS may result in the plugin not working.
     - `PJ_TAG[=3.9.2]`: The PlotJuggler git branch or tag to use when cloing and compiling PlotJuggler.
 
@@ -48,27 +50,70 @@ Once compilation is finished, you will find your `.so` plugin in the `artifacts`
 
 ### 2b. Compile locally
 
+1. Clone and compile PlotJuggler [following the instructions](https://github.com/facontidavide/PlotJuggler/blob/main/COMPILE.md).
+    Make a note of the workspace folder you created (where the `src`, `build` and `install` folders live).
 1. Install the dependencies:  
-    The plugin uses Qt as dependency. Since PlotJuggler also depends on Qt, chances are high that you already have it installed. On Ubuntu Qt can be installed with:
+    The plugin uses Qt as dependency.
+    Since PlotJuggler also depends on Qt, chances are high that you already have it installed.
+    On Ubuntu Qt can be installed with:
 
-    ```
+    ```bash
     sudo apt -y install qtbase5-dev libqt5svg5-dev
     ```
 
-2. If you want the units to be displayed in PlotJuggler (read at the end), you need to edit `dataload_apbin.cpp` and activate `#define LABEL_WITH_UNIT`.  
+2. The optional features are selected with cmake options, both `OFF` by default:
+    - `-DADD_UNITS=ON` displays the units of the logged fields (read at the end).
+    - `-DADD_RCOU_FUNCTION_LABELS=ON` displays the channel function next to its name.
 
 3. Compile using cmake:
 
-    ```
+    ```bash
+    export PJ_WS=<absolute_path_to_plotjugger_workspace>
+    export LIBRARY_PATH="$LIBRARY_PATH:$PJ_WS/install/lib"
     mkdir build; cd build
-    cmake ..
+    cmake -DCMAKE_PREFIX_PATH="$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
     make
     sudo make install
     ```
 
+### Testing a built plugin
+
+`tests/` holds a headless check that loads a plugin the way PlotJuggler does and
+parses the small log in `tests/logs/`, without starting the GUI.
+It also verifies that the cmake options above actually reached the binary, and on
+Linux reports whether the plugin's libstdc++ requirement is satisfied by your
+system — which is what catches a plugin built on a newer distro than the one
+running it.
+
+```bash
+cmake -S tests -B tests/build -DPJ_INCLUDE_DIR="$PJ_WS/install/include"
+cmake --build tests/build
+./tests/test_plugin.sh build/libDataAPBin.so
+```
+
+Point it at a plugin downloaded from CI or a release to check it before use.
+
+### Notes for building on MacOS
+
+Qt dependencies may not be found automatically.
+If you run into issues, try this `cmake` command instead:
+
+```bash
+cmake -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@5;$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
+```
+
+If using this plugin with the new official PlotJuggler .dmg releases, you may run into signing and security issues.
+This command allows running a custom plugin on a signed version of PlotJuggler:
+
+```bash
+sudo codesign --force --deep --sign - /Applications/PlotJuggler.app
+```
+
+This likely adds your signature to the app so your plugin and the official .dmg now share a common signature.
+
 ## Install plotjuggler-apbin-plugin
 
-PlotJuggler looks for plugins in specific folders. 
+PlotJuggler looks for plugins in specific folders.
 Check **App->Preferences->Plugins** in PlotJuggler to find out which they are and add more if you wish to.
 
 If you have added a folder, you will need to restart PlotJuggler for the change to take effect.
@@ -92,7 +137,7 @@ Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in o
 
 This plugin allows the units of logged fields to be appended to the logged field names.
 
-**Be careful:**  
+**Be careful:**
 
 If you created a PlotJuggler layout without units and then enable the units, the layout will be unusable and vice-versa.
 This is because the units are part of the field name; hence, the original field name no longer exists.

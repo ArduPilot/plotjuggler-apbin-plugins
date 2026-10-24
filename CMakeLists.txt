@@ -1,37 +1,59 @@
 cmake_minimum_required(VERSION 3.7)
-
+cmake_policy(SET CMP0068 NEW)
 project(plotjuggler_apbin_plugins)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-#-------  Include Qt dependencies -------
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
+#--- Basic Qt setup
 set(CMAKE_AUTOMOC ON)
-SET(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-find_package(Qt5 REQUIRED COMPONENTS
-    Core
-    Concurrent
-    Widgets
-    Xml
-    Svg)
+find_package(Qt5 REQUIRED COMPONENTS Core Concurrent Widgets Xml Svg)
 
-include_directories(
-    ${Qt5Core_INCLUDE_DIRS}
-    ${Qt5Widgets_INCLUDE_DIRS}
-    ${Qt5Xml_INCLUDE_DIRS}
-    ${Qt5Svg_INCLUDE_DIRS} )
+# Generate embedded log message descriptions header at build time
+find_program(PYTHON3_EXECUTABLE python3 python)
+if(NOT PYTHON3_EXECUTABLE)
+    message(STATUS "Python3 not found; logmessage header generation will create an empty header at build time")
+else()
+    set(GEN_LOGMSG_HDR_OUT ${CMAKE_CURRENT_BINARY_DIR}/LogMessageDescriptions.h)
+    add_custom_command(
+        OUTPUT ${GEN_LOGMSG_HDR_OUT}
+        COMMAND ${PYTHON3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/scripts/generate_LogMessageDescriptions_header.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions
+            ${GEN_LOGMSG_HDR_OUT}
+        DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/scripts/generate_LogMessageDescriptions_header.py
+        COMMENT "Generating LogMessageDescriptions.h from available XML files"
+        VERBATIM
+    )
+    add_custom_target(gen_logmsg_hdr DEPENDS ${GEN_LOGMSG_HDR_OUT})
+endif()
 
-set(QT_LIBRARIES
-    Qt5::Core
-    Qt5::Concurrent
-    Qt5::Widgets
-    Qt5::Xml
-    Qt5::Svg )
+#--- Find PlotJuggler and its dependencies, and set paths
+if(CATKIN_DEVEL_PREFIX OR catkin_FOUND OR CATKIN_BUILD_BINARY_PACKAGE)
+    # --- Build with CATKIN (ROS1) ---
+    message(STATUS "COMPILING_WITH_CATKIN")
+    find_package(catkin REQUIRED COMPONENTS plotjuggler)
+    include_directories(${catkin_INCLUDE_DIRS})
+    set(PJ_LIBS ${catkin_LIBRARIES})
 
-add_definitions( ${QT_DEFINITIONS} -DQT_PLUGIN )
-set( PJ_LIBRARIES ${QT_LIBRARIES} )
+elseif(DEFINED ENV{AMENT_PREFIX_PATH})
+    # --- Build with AMENT (ROS2) ---
+    message(STATUS "COMPILING_WITH_AMENT")
+    find_package(ament_cmake REQUIRED)
+    find_package(plotjuggler REQUIRED)
+    include_directories(${plotjuggler_INCLUDE_DIR})
+    set(PJ_LIBS ${plotjuggler_LIBRARIES})
+else()
+    # --- Build without any ROS support (standalone) ---
+    message(STATUS "COMPILING STANDALONE")
+    find_package(plotjuggler REQUIRED)
+    # This is the critical line for moc to find the PJ::DataLoader interface
+    include_directories(${plotjuggler_INCLUDE_DIR})
+    set(PJ_LIBS ${plotjuggler_LIBRARIES})
+endif()
+
 
 #-------------- Switch units support ----------------
 OPTION(ADD_UNITS "Add units support" OFF)
@@ -40,62 +62,67 @@ IF(ADD_UNITS)
     message(STATUS "Enabling field units define.")
 ENDIF(ADD_UNITS)
 
-#--------------------------------------------------------
-#-------------- Build with CATKIN (ROS1) ----------------
-if( CATKIN_DEVEL_PREFIX OR catkin_FOUND OR CATKIN_BUILD_BINARY_PACKAGE)
 
-    set(COMPILING_WITH_CATKIN 1)
-    message(STATUS "COMPILING_WITH_CATKIN")
-    add_definitions(-DCOMPILED_WITH_CATKIN)
+#-------------- Switch RCOU/RCO2 function labels ----------------
+OPTION(ADD_RCOU_FUNCTION_LABELS "Add RCOU/RCO2 servo function labels" OFF)
+IF(ADD_RCOU_FUNCTION_LABELS)
+    add_compile_definitions("LABEL_RCOU_FUNCTION")
+    message(STATUS "Enabling RCOU/RCO2 function labels define.")
+ENDIF(ADD_RCOU_FUNCTION_LABELS)
 
-    find_package(catkin REQUIRED COMPONENTS plotjuggler )
-    catkin_package(
-        CATKIN_DEPENDS plotjuggler
-        )
-    include_directories(${catkin_INCLUDE_DIRS})
-    list(APPEND ${PJ_LIBRARIES} ${catkin_LIBRARIES} )
-    set(PJ_PLUGIN_INSTALL_DIRECTORY ${CATKIN_PACKAGE_BIN_DESTINATION} )
 
-    #--------------------------------------------------------
-    #-------------- Build with AMENT (ROS2) -----------------
-elseif( DEFINED ENV{AMENT_PREFIX_PATH})
-
-    set(COMPILING_WITH_AMENT 1)
-    message(STATUS "COMPILING_WITH_AMENT")
-    add_definitions(-DCOMPILED_WITH_AMENT)
-
-    find_package(ament_cmake REQUIRED)
-    find_package(plotjuggler REQUIRED)
-    set(PJ_PLUGIN_INSTALL_DIRECTORY lib/${PROJECT_NAME} )
-
-    #--------------------------------------------------------
-    #------------- Build without any ROS support ------------
-else()
-
-    find_package(plotjuggler REQUIRED)
-    message(STATUS "PlotJuggler FOUND")
-    message(STATUS "plotjuggler_INCLUDE_DIR: ${plotjuggler_INCLUDE_DIR}")
-    message(STATUS "plotjuggler_LIBRARIES: ${plotjuggler_LIBRARIES}")
-
-    include_directories(${plotjuggler_INCLUDE_DIR})
-    list(APPEND PJ_LIBRARIES ${plotjuggler_LIBRARIES} )
-    set(PJ_PLUGIN_INSTALL_DIRECTORY bin )
-
-endif()
-
-#------- Create the libraries -------
+#------- Create the library -------
 add_library(DataAPBin SHARED
     DataLoadAPBin/dataload_apbin.h
-    DataLoadAPBin/dataload_apbin.cpp )
+    DataLoadAPBin/dataload_apbin.cpp
+)
 
-target_link_libraries(DataAPBin
-    ${PJ_LIBRARIES})
+# Link against both plotjuggler libraries and the required Qt modules.
+target_link_libraries(DataAPBin PRIVATE
+    ${PJ_LIBS}
+    Qt5::Core
+    Qt5::Concurrent
+    Qt5::Widgets
+    Qt5::Xml
+    Qt5::Svg
+)
+
+# Ensure generated header is available and included
+if(TARGET gen_logmsg_hdr)
+    add_dependencies(DataAPBin gen_logmsg_hdr)
+    target_include_directories(DataAPBin PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+else()
+    # still add build dir to include path so an empty autogenerated header may be placed there by other tooling
+    target_include_directories(DataAPBin PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+endif()
 
 if (COMPILING_WITH_AMENT)
     ament_target_dependencies(DataAPBin plotjuggler)
 endif()
 
-#------- Install the libraries -------
+# We need to tell Qt this is a plugin.
+target_compile_definitions(DataAPBin PRIVATE QT_PLUGIN)
+
+
+#------- Installation and RPATH for macOS -------
+set(CMAKE_MACOSX_RPATH ON)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+set(CMAKE_INSTALL_RPATH "@executable_path/../Frameworks")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+
+set_target_properties(DataAPBin PROPERTIES
+    INSTALL_NAME_DIR "@rpath"
+)
+
+if(CATKIN_DEVEL_PREFIX OR catkin_FOUND OR CATKIN_BUILD_BINARY_PACKAGE)
+    set(PJ_PLUGIN_INSTALL_DIRECTORY ${CATKIN_PACKAGE_BIN_DESTINATION})
+elseif(DEFINED ENV{AMENT_PREFIX_PATH})
+    set(PJ_PLUGIN_INSTALL_DIRECTORY lib/${PROJECT_NAME})
+else()
+    set(PJ_PLUGIN_INSTALL_DIRECTORY bin)
+endif()
+
 install(
     TARGETS
         DataAPBin

@@ -13,15 +13,26 @@
 
 #include "dataload_apbin.h"
 #include <QFile>
-#include <QMessageBox>
-#include <QProgressDialog>
-#include <QDateTime>
-#include <QInputDialog>
 #include <QElapsedTimer>
 #include <QDebug>
+#include <QXmlStreamReader>
+#include <QFileInfo>
+#include <QDir>
+#include <QCoreApplication>
+#include "LogMessageDescriptions.h"
+#include <array>
 #include <chrono>
 #include <cmath>
-#include <array>
+#include <cstdio>
+#include <iomanip>
+#include <map>
+#include <optional>
+#include <set>
+#include <sstream>
+#include <string>
+#include <vector>
+#include <cstring>
+#include <cctype>
 
 // Debugging 
 //#define DEBUG_RUNTIME
@@ -29,8 +40,8 @@
 //#define DEBUG_MULTIPLIERS
 //#define DEBUG_UNITS
 
-// Config
-//#define LABEL_WITH_UNIT
+// LABEL_WITH_UNIT and LABEL_RCOU_FUNCTION are set by the build: see the
+// ADD_UNITS and ADD_RCOU_FUNCTION_LABELS options in CMakeLists.txt.
 
 bool is_nearly(double val, int val2)
 {
@@ -48,6 +59,8 @@ bool is_nearly(double val, int val2)
 DataLoadAPBIN::DataLoadAPBIN()
 {
   extensions.push_back("BIN");  // TODO : this doesn't work for now as tolower() is hardcoded.
+  qRegisterMetaType<std::vector<Parameter>>();
+  qRegisterMetaType<std::vector<StatusText>>();
 }
 
 const std::vector<const char*>& DataLoadAPBIN::compatibleFileExtensions() const
@@ -124,23 +137,9 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
 
   while (true)
   {
-    // update the progression dialog box
-    progress_update = static_cast<int>((static_cast<double>(total_bytes_used) / static_cast<double>(file_size)) * 100.0);
-    if ( (progress_update - 4) > progress )
-    {
-      progress = progress_update;
-      progress_dialog.setValue(progress);
-      QApplication::processEvents();
-      if (progress_dialog.wasCanceled())
-      {
-        return false;
-      }
-    }
-
     // check if end of file is reached
     if (len - total_bytes_used < LOG_PACKET_HEADER_LEN)
     {
-      progress_dialog.setValue(100);
       bytes_skipped += len - total_bytes_used;
       break;
     }
@@ -269,7 +268,6 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     //  - if we reached the end of the log, just end
     if (len - total_bytes_used < fmt.length)
     {
-      progress_dialog.setValue(100);
       bytes_skipped += len - total_bytes_used;
       break;
     }
@@ -394,14 +392,63 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
     }
     if ( memcmp(fmt.name, "MSG", 3) == 0 )
     {
+      // ArduPilot changed the MSG format from "QZ" (TimeUS,Message) to
+      // "QBBZ" (TimeUS,ID,Seq,Message), inserting two bytes before the text.
+      // Locate the fields by name from the FMT so both layouts parse correctly.
+      const uint32_t time_offset = get_field_byte_offset(type, "TimeUS");
+      const uint32_t msg_offset  = get_field_byte_offset(type, "Message");
+
+      uint64_t time_us = 0;
+      memcpy(&time_us, &buf[total_bytes_used + time_offset], sizeof(time_us));
+
+      // The Message field spans the remainder of the record. It is only
+      // null-terminated if the text is shorter than the field width.
+      const char* msg_text = reinterpret_cast<const char*>(&buf[total_bytes_used + msg_offset]);
+      const size_t msg_field_size = fmt.length - msg_offset;
+      const void* msg_nul = memchr(msg_text, '\0', msg_field_size);
+      const size_t msg_length = msg_nul != nullptr
+          ? static_cast<const char*>(msg_nul) - msg_text
+          : msg_field_size;
+      _status_texts.push_back({time_us, 0, std::string(msg_text, msg_length)});
+
       total_bytes_used += fmt.length;
-      msgs_skipped++;
+      msgs_read++;
       continue;
     }
     if ( memcmp(fmt.name, "PARM", 4) == 0 )
     {
+      const auto* param = reinterpret_cast<const log_param*>(&buf[total_bytes_used]);
+      // Check if the parameter name string is null-terminated. It will not be
+      // in the case where the name fills in the full 16-char space.
+      const void* name_nul = memchr(param->name, '\0', sizeof(param->name));
+      const size_t name_length = name_nul != nullptr
+          ? static_cast<const char*>(name_nul) - param->name
+          : sizeof(param->name);
+      std::string name = std::string(param->name, name_length);
+      _parameters.push_back({name + "          Default: " + format_default_value(param->default_value) , param->value});
+
+      #ifdef LABEL_RCOU_FUNCTION
+      // save servo functions
+      QRegExp rx("SERVO(\\d+)_FUNCTION");
+      if (rx.indexIn(QString::fromStdString(name)) != -1) {
+        bool is_int = false;
+        int servo_idx = rx.cap(1).toInt(&is_int);
+
+        if (is_int && servo_idx > 0 && servo_idx <= 32) {
+          const int function_id = static_cast<int>(param->value);
+          // skip over the "disabled" ones
+          if (function_id != 0) {
+            auto it = SERVO_FUNCTION_MAP.find(function_id);
+            if (it != SERVO_FUNCTION_MAP.end()) {
+              _servo_function_labels[servo_idx - 1] = it->second;
+            }
+          }
+        }
+      }
+      #endif
+
       total_bytes_used += fmt.length;
-      msgs_skipped++;
+      msgs_read++;
       continue;
     }
 
@@ -536,6 +583,11 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   #endif
 
   // -------------------- publish to plotjuggler -------------------- //
+#ifdef QT_CORE_LIB
+  load_log_messages(info->filename);
+#else
+  load_log_messages(info->filename);
+#endif
   #ifdef DEBUG_RUNTIME
     auto publish_start = std::chrono::high_resolution_clock::now();
   #endif
@@ -568,6 +620,10 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
       const std::vector<double>& timestamps = msg_data[time_idx].second;
 
       size_t idx = 0;
+      bool message_desc_assigned = false;
+      std::string message_desc;
+      auto mit = _message_tooltips.find(msg_name);
+      if (mit != _message_tooltips.end()) message_desc = mit->second;
       for (const auto& field : msg_data)
       {
         if ( idx == time_idx || ( has_instance[msg_id] && (idx == instance_idx[msg_id]) ) )
@@ -589,6 +645,21 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
         {
           series_name = "/" + msg_name + "/" + instance_name + "/" + field_name;
         }
+        
+        #ifdef LABEL_RCOU_FUNCTION
+        // label servo functions
+        if (msg_name == "RCOU" || msg_name == "RCO2") {
+          QRegExp re(R"(C(\d+))");
+          if(re.indexIn(QString::fromStdString(field_name)) != -1) {
+            int label_idx = re.cap(1).toInt() - 1; // is 1-based
+
+            if(label_idx >= 0 && label_idx < 32 && !_servo_function_labels[label_idx].empty()) {
+              series_name = series_name + " (" + _servo_function_labels[label_idx] + ")";
+            }
+          }
+        }
+        #endif
+
 
         #ifdef LABEL_WITH_UNIT
           std::string unit_str = get_unit(msg_name, field_name);
@@ -599,6 +670,30 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
         #endif
                 
         auto series = plot_data.addNumeric(series_name);
+
+        // Prefer per-field descriptions. Only attach message description to the
+        // first series for this message instance that does not have a field description.
+        std::string field_desc;
+        auto fit_map_it = _field_tooltips.find(msg_name);
+        if (fit_map_it != _field_tooltips.end())
+        {
+          auto fit = fit_map_it->second.find(field_name);
+          if (fit != fit_map_it->second.end())
+          {
+            field_desc = fit->second;
+          }
+        }
+
+        if (!field_desc.empty())
+        {
+          series->second.setAttribute(PJ::TOOL_TIP, QString::fromStdString(field_desc));
+        }
+        else if (!message_desc_assigned && !message_desc.empty())
+        {
+          // attach message description once for this instance
+          series->second.setAttribute(PJ::TOOL_TIP, QString::fromStdString(message_desc));
+          message_desc_assigned = true;
+        }
 
         for (size_t i = 0; i < field.second.size(); i++)
         {
@@ -641,7 +736,91 @@ bool DataLoadAPBIN::readDataFromFile(FileLoadInfo* info, PlotDataMapRef& plot_da
   std::printf("\n  Skipped messages:\t%lu", static_cast<unsigned long long>(msgs_skipped));
   std::printf("\n  Skipped bytes:\t%lu from %lu bytes\n\n", static_cast<unsigned long long>(bytes_skipped, len));
 
+  #if defined(DEBUG_RUNTIME) && defined(LABEL_RCOU_FUNCTION)
+  for (int i = 0; i < 32; i++) {
+    if (i < 14) {
+      std::printf("\nRCOU.C%d: %s", i + 1, _servo_function_labels[i].c_str());
+    } else {
+      std::printf("\nRCO2.C%d: %s", i + 1, _servo_function_labels[i].c_str());
+    }
+  }
+  #endif
+
+  // Now, add the parameters as time series.
+  for (const auto& param : _parameters)
+  {
+    auto series = plot_data.addNumeric(std::string("/1. Parameters/") + param.name);
+    series->second.pushBack({300, param.value});
+  }
+
+
+  #ifdef DEBUG_MESSAGES
+  std::printf("Message Log\n---------------");
+  #endif
+
+  for(int i = 0; i < _status_texts.size(); i++)
+  {
+    #ifdef DEBUG_MESSAGES
+    std::printf("\n %llu: %s", _status_texts[i].timestamp, _status_texts[i].msg.c_str());
+    #endif
+
+    // change "/" to "\" if a status_text contains one so it doesn't create a child entry
+    std::string msg = _status_texts[i].msg;
+    size_t start_pos = 0;
+    while((start_pos = msg.find('/', start_pos)) != std::string::npos) {
+        msg.replace(start_pos, 1, "\\");
+        start_pos += 2; // Handles cases where the replacement also contains the search string
+    }
+
+    auto time_s = static_cast<double>(_status_texts[i].timestamp)/1e6;
+
+    auto& timeline = plot_data.getOrCreateNumeric("/2. Message Timeline");
+    timeline.pushBack({time_s + _time_offset, (double)(i + 1)});
+
+    auto series = plot_data.addNumeric(std::string("/3. Message Log/") + std::to_string(i + 1) + ". " + msg);
+    series->second.pushBack({0.0, time_s - _start_plot_time});
+  }
+
+  #ifdef DEBUG_MESSAGES
+  std::printf("\n---------------\n");
+  #endif
+
   return true;
+}
+
+std::string DataLoadAPBIN::format_default_value(float val) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2) << val;
+    std::string s = ss.str();
+
+    // trim trailing zeros
+    s.erase(s.find_last_not_of('0') + 1);
+    if (!s.empty() && s.back() == '.') s.pop_back();
+
+    return s;
+}
+
+std::string DataLoadAPBIN::format_time(double seconds)
+{
+    int minutes = static_cast<int>(seconds / 60.0);
+    double rem = seconds - minutes * 60.0;
+
+    int secs = static_cast<int>(rem);
+    int tenths = static_cast<int>(std::round((rem - secs) * 10.0));
+
+    // handle rounding overflow (e.g. 59.96 -> 1:00.0)
+    if (tenths == 10) {
+        tenths = 0;
+        secs++;
+        if (secs == 60) {
+            secs = 0;
+            minutes++;
+        }
+    }
+
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%d:%02d.%d", minutes, secs, tenths);
+    return buf;
 }
 
 void DataLoadAPBIN::handle_message_received(const struct log_Format& fmt, const uint8_t* msg)
@@ -893,6 +1072,76 @@ std::string DataLoadAPBIN::get_unit(const std::string& msg_name, const std::stri
   return unit_it->second;
 }
 
+
+void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
+{
+  // Helper to parse a QXmlStreamReader and merge descriptions
+  auto parseXml = [&](QXmlStreamReader &xml) {
+    while (!xml.atEnd() && !xml.hasError())
+    {
+      xml.readNext();
+      if (xml.isStartElement() && xml.name() == QLatin1String("logformat"))
+      {
+        QString msgName = xml.attributes().value(QLatin1String("name")).toString();
+        QString msgDesc;
+
+        // process children until end of this logformat
+        while (!(xml.isEndElement() && xml.name() == QLatin1String("logformat")))
+        {
+          xml.readNext();
+          if (xml.isStartElement())
+          {
+            if (xml.name() == QLatin1String("description"))
+            {
+              msgDesc = xml.readElementText().trimmed();
+              _message_tooltips[msgName.toStdString()] = msgDesc.toStdString();
+            }
+            else if (xml.name() == QLatin1String("field"))
+            {
+              QString fieldName = xml.attributes().value(QLatin1String("name")).toString();
+              // read inside field until end
+              while (!(xml.isEndElement() && xml.name() == QLatin1String("field")))
+              {
+                xml.readNext();
+                if (xml.isStartElement() && xml.name() == QLatin1String("description"))
+                {
+                  QString fdesc = xml.readElementText().trimmed();
+                  _field_tooltips[msgName.toStdString()][fieldName.toStdString()] = fdesc.toStdString();
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+
+  // First, parse embedded XMLs compiled into the library (if present).
+  // Use a sanity check on the embedded string rather than relying on sizeof.
+  const std::string& embedded = GetEmbeddedLogMessagesXml();
+  if (!embedded.empty())
+  {
+    const char* emb = embedded.c_str();
+    size_t emb_len = embedded.size();
+    // require a minimal length and at least one '<' character after skipping whitespace
+    if (emb_len > 10)
+    {
+      size_t i = 0;
+      while (i < emb_len && std::isspace(static_cast<unsigned char>(emb[i]))) ++i;
+      if (i < emb_len && emb[i] == '<')
+      {
+        QXmlStreamReader xmlEmbedded(QString::fromUtf8(emb, static_cast<int>(emb_len)));
+        parseXml(xmlEmbedded);
+        if (xmlEmbedded.hasError())
+        {
+          qDebug() << "Warning: embedded log message XML parse error:" << xmlEmbedded.errorString();
+        }
+      }
+    }
+  }
+}
+
+
 void DataLoadAPBIN::apply_multipliers(void)
 {
   // TimeUS is always stored by AP_Logger as raw microseconds, for every
@@ -1134,5 +1383,9 @@ void DataLoadAPBIN::apply_timesync(void)
   const double time_offset_sec = unix_time_sec - log_time_sec;
   const double time_offset_us = time_offset_sec * 1e6;
 
-  shift_all_timestamps(messages_map, field_name2idx, time_offset_us);
+  // Expose the offset for the status-text / parameter / message-timeline series
+  _start_plot_time = log_time_sec;
+  _time_offset     = time_offset_sec;
+
+  shift_all_timestamps(messages_map, field_name2idx, time_offset_sec);
 }
