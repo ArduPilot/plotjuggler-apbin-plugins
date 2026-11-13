@@ -238,6 +238,37 @@ QString syntheticLog(const QString& directory, bool modern_msg,
   require(file.write(bytes) == bytes.size(), "cannot write fixture");
   return path;
 }
+QString metadataLog(const QString& directory, const std::string& banner) {
+  QByteArray bytes;
+  addFormat(bytes, 42, 15, "CTUN", "Qf", "TimeUS,ThO");
+  addFormat(bytes, 43, 15, "PIDW", "Qf", "TimeUS,Act");
+  addFormat(bytes, 44, 15, "ATIS", "Qf", "TimeUS,pAcc");
+  addFormat(bytes, 45, 19, "SBLM", "Qff", "TimeUS,RAx,Extra");
+  if (!banner.empty()) addFormat(bytes, 46, 75, "MSG", "QZ", "TimeUS,Message");
+  for (uint8_t type : {42, 43, 44, 45}) {
+    bytes.append(char(0xa3));
+    bytes.append(char(0x95));
+    bytes.append(char(type));
+    appendLE(bytes, uint64_t(2000000));
+    appendLE(bytes, float(1.0));
+    if (type == 45) appendLE(bytes, float(2.0));
+  }
+  if (!banner.empty()) {
+    bytes.append(char(0xa3));
+    bytes.append(char(0x95));
+    bytes.append(char(46));
+    appendLE(bytes, uint64_t(1000000));
+    QByteArray text(64, '\0');
+    std::memcpy(text.data(), banner.data(),
+                std::min<size_t>(banner.size(), 64));
+    bytes += text;
+  }
+  const auto path = directory + "/metadata.bin";
+  QFile file(path);
+  require(file.open(QFile::WriteOnly), "cannot create metadata fixture");
+  require(file.write(bytes) == bytes.size(), "cannot write metadata fixture");
+  return path;
+}
 QString snapshotOnlyLog(const QString& directory, bool parameters,
                         bool messages) {
   QByteArray bytes;
@@ -387,6 +418,33 @@ int main(int argc, char** argv) {
     compareSeries(first, host.series);
     QTemporaryDir directory;
     require(directory.isValid(), "temporary directory unavailable");
+    // CTUN.ThO differs between vehicle metadata; PIDW and ATIS are new JSON
+    // entries, while SBLM exists only in the retained legacy descriptions.
+    for (const auto& [banner, throttle] :
+         {std::pair{"ArduCopter V4.7.0", "throttle output"},
+          std::pair{"ArduPlane V4.7.0", "scaled output throttle"},
+          std::pair{"", "scaled output throttle"}}) {
+      host = RecordingHost{};
+      ok(source.loadConfig(config(metadataLog(directory.path(), banner))));
+      ok(source.start());
+      const auto descriptions =
+          QJsonDocument::fromJson(QByteArray::fromStdString(host.metadata))
+              .object()
+              .value("field_descriptions")
+              .toObject();
+      require(descriptions.value("/CTUN/ThO").toString() == throttle,
+              "wrong vehicle's JSON field description");
+      require(descriptions.value("/PIDW/Act").toString() == "achieved value",
+              "new JSON field description missing");
+      require(descriptions.value("/ATIS/pAcc").toString() ==
+                  "Shaped pitch acceleration target",
+              "other vehicle's JSON fallback missing");
+      require(descriptions.value("/SBLM/RAx").toString() ==
+                      "acceleration around X axis" &&
+                  descriptions.value("/SBLM/Extra").toString() ==
+                      "Simulated Blimp Rotational Accelerations",
+              "legacy field or message description lost");
+    }
     host = RecordingHost{};
     ok(source.loadConfig(config(repeatedParameterLog(directory.path()))));
     ok(source.start());
@@ -489,7 +547,8 @@ int main(int argc, char** argv) {
                 host.progress_finished,
             "timestamp overflow or exception cleanup failed");
     std::printf(
-        "OK: real log (%zu series), repeated imports and parameters, "
+        "OK: real log (%zu series), JSON descriptions, repeated imports and "
+        "parameters, "
         "snapshot-only logs, both MSG "
         "layouts, "
         "nanosecond timestamps, config, cancellation and errors\n",

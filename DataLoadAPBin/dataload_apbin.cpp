@@ -15,11 +15,11 @@
 #include <QFile>
 #include <QElapsedTimer>
 #include <QDebug>
-#include <QXmlStreamReader>
 #include <QFileInfo>
 #include <QDir>
 #include <QCoreApplication>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QRegularExpression>
@@ -40,7 +40,6 @@
 #include <string>
 #include <vector>
 #include <cstring>
-#include <cctype>
 
 // Debugging 
 //#define DEBUG_RUNTIME
@@ -624,7 +623,7 @@ PJ::Status DataLoadAPBIN::importData() try
   #endif
 
   // PlotJuggler 4 stores records by topic and field, with nanosecond timestamps.
-  load_log_messages(_filepath);
+  load_log_messages();
   #ifdef DEBUG_RUNTIME
     auto publish_start = std::chrono::high_resolution_clock::now();
   #endif
@@ -1099,71 +1098,68 @@ std::string DataLoadAPBIN::get_unit(const std::string& msg_name, const std::stri
 }
 
 
-void DataLoadAPBIN::load_log_messages(const QString& datafile_path)
+void DataLoadAPBIN::load_log_messages()
 {
-  // Helper to parse a QXmlStreamReader and merge descriptions
-  auto parseXml = [&](QXmlStreamReader &xml) {
-    while (!xml.atEnd() && !xml.hasError())
-    {
-      xml.readNext();
-      if (xml.isStartElement() && xml.name() == QLatin1String("logformat"))
-      {
-        QString msgName = xml.attributes().value(QLatin1String("name")).toString();
-        QString msgDesc;
+  // A firmware banner identifies which vehicle's descriptions take precedence.
+  // Without one, merge Copter followed by Plane as the previous loader did.
+  enum class Vehicle { unknown, copter, plane };
+  auto vehicle = Vehicle::unknown;
+  for (const auto& text : _status_texts)
+  {
+    if (text.msg.starts_with("ArduCopter V")) { vehicle = Vehicle::copter; break; }
+    if (text.msg.starts_with("ArduPlane V")) { vehicle = Vehicle::plane; break; }
+  }
 
-        // process children until end of this logformat
-        while (!(xml.isEndElement() && xml.name() == QLatin1String("logformat")))
-        {
-          xml.readNext();
-          if (xml.isStartElement())
-          {
-            if (xml.name() == QLatin1String("description"))
-            {
-              msgDesc = xml.readElementText().trimmed();
-              _message_tooltips[msgName.toStdString()] = msgDesc.toStdString();
-            }
-            else if (xml.name() == QLatin1String("field"))
-            {
-              QString fieldName = xml.attributes().value(QLatin1String("name")).toString();
-              // read inside field until end
-              while (!(xml.isEndElement() && xml.name() == QLatin1String("field")))
-              {
-                xml.readNext();
-                if (xml.isStartElement() && xml.name() == QLatin1String("description"))
-                {
-                  QString fdesc = xml.readElementText().trimmed();
-                  _field_tooltips[msgName.toStdString()][fieldName.toStdString()] = fdesc.toStdString();
-                }
-              }
-            }
-          }
-        }
+  auto parseJson = [&](const std::string& content, bool overwrite) {
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(QByteArray::fromStdString(content), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+    {
+      qWarning() << "Warning: embedded log message JSON parse error:" << error.errorString();
+      return;
+    }
+    for (const auto& item : document.object().value("logformats").toArray())
+    {
+      const auto message = item.toObject();
+      const auto name = message.value("name").toString().toStdString();
+      if (name.empty()) continue;
+      const auto description = message.value("description").toString().trimmed().toStdString();
+      if (!description.empty() && (overwrite || _message_tooltips[name].empty()))
+        _message_tooltips[name] = description;
+      for (const auto& item_field : message.value("fields").toArray())
+      {
+        const auto field = item_field.toObject();
+        const auto field_name = field.value("name").toString().toStdString();
+        const auto field_description = field.value("description").toString().trimmed().toStdString();
+        if (!field_name.empty() && !field_description.empty() &&
+            (overwrite || _field_tooltips[name][field_name].empty()))
+          _field_tooltips[name][field_name] = field_description;
       }
     }
   };
 
-  // First, parse embedded XMLs compiled into the library (if present).
-  // Use a sanity check on the embedded string rather than relying on sizeof.
-  const std::string& embedded = GetEmbeddedLogMessagesXml();
-  if (!embedded.empty())
+  // Prefer the matching vehicle's current descriptions. Legacy descriptions
+  // and the other vehicle fill gaps in the matching snapshot.
+  if (vehicle == Vehicle::copter)
   {
-    const char* emb = embedded.c_str();
-    size_t emb_len = embedded.size();
-    // require a minimal length and at least one '<' character after skipping whitespace
-    if (emb_len > 10)
-    {
-      size_t i = 0;
-      while (i < emb_len && std::isspace(static_cast<unsigned char>(emb[i]))) ++i;
-      if (i < emb_len && emb[i] == '<')
-      {
-        QXmlStreamReader xmlEmbedded(QString::fromUtf8(emb, static_cast<int>(emb_len)));
-        parseXml(xmlEmbedded);
-        if (xmlEmbedded.hasError())
-        {
-          qDebug() << "Warning: embedded log message XML parse error:" << xmlEmbedded.errorString();
-        }
-      }
-    }
+    parseJson(GetEmbeddedCopterLogMessagesJson(), true);
+    parseJson(GetEmbeddedCopterLegacyDescriptionsJson(), false);
+    parseJson(GetEmbeddedPlaneLogMessagesJson(), false);
+    parseJson(GetEmbeddedPlaneLegacyDescriptionsJson(), false);
+  }
+  else if (vehicle == Vehicle::plane)
+  {
+    parseJson(GetEmbeddedPlaneLogMessagesJson(), true);
+    parseJson(GetEmbeddedPlaneLegacyDescriptionsJson(), false);
+    parseJson(GetEmbeddedCopterLogMessagesJson(), false);
+    parseJson(GetEmbeddedCopterLegacyDescriptionsJson(), false);
+  }
+  else
+  {
+    parseJson(GetEmbeddedCopterLogMessagesJson(), true);
+    parseJson(GetEmbeddedPlaneLogMessagesJson(), true);
+    parseJson(GetEmbeddedPlaneLegacyDescriptionsJson(), false);
+    parseJson(GetEmbeddedCopterLegacyDescriptionsJson(), false);
   }
 }
 

@@ -97,10 +97,10 @@ private:
   // get unit string for a field
   std::string get_unit(const std::string& msg_name, const std::string& field_name);
 
-  // load human readable descriptions from LogMessages.xml
-  void load_log_messages(const QString& datafile_path);
+  // load human readable descriptions from bundled JSON metadata
+  void load_log_messages();
 
-  // tooltips/descriptions loaded from LogMessages.xml
+  // tooltips/descriptions loaded from ArduPilot log metadata
   std::map<std::string, std::string> _message_tooltips;
   std::map<std::string, std::map<std::string, std::string>> _field_tooltips;
 

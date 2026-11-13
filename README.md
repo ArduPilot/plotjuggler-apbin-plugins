@@ -174,8 +174,23 @@ including older logs without FMTU. Every import resets the decoding state.
 
 The message timeline is now `/2. Message Timeline/index`, since PlotJuggler 4
 represents scalar series as a topic plus field. The SDK's scalar write API has
-no per-field tooltip setter; XML descriptions are retained in dataset metadata
-under `field_descriptions`, available in the metadata inspector.
+no per-field tooltip setter; descriptions are retained in dataset metadata under
+`field_descriptions`, available in the metadata inspector.
+
+Copter and Plane descriptions are bundled for offline use from compressed JSON
+snapshots in `DataLoadAPBin/LogMessageDescriptions`. The Copter snapshot can be
+refreshed from [ArduPilot's published metadata](https://firmware.ardupilot.org/Copter/latest/__METADATA__/LogMessages.json.xz);
+the Plane snapshot comes from the corresponding Plane firmware metadata. Save
+them as `Copter_LogMessages.json.xz` and `Plane_LogMessages.json.xz`. Their
+`firmware.git_sha` identifies the snapshot's source revision. Rebuild the plugin
+after updating either file. Small legacy JSON files retain descriptions and enum
+entries for older logs that are absent from the newer snapshots; the loader uses
+the descriptions, while the enum entries are kept for reference. When a log
+contains an ArduCopter or ArduPlane firmware banner, the matching JSON takes
+precedence; otherwise the snapshots are merged, with Plane taking precedence for
+shared fields. Legacy
+descriptions and the other vehicle's metadata fill missing fields. These snapshots
+may differ from the log's firmware version.
 
 ## Test a downloaded or locally built binary
 

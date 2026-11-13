@@ -40,12 +40,16 @@ endif()
 option(ADD_UNITS "Append units to field names" OFF)
 option(ADD_RCOU_FUNCTION_LABELS "Append servo functions to RCOU/RCO2 field names" OFF)
 
-file(GLOB LOGMSG_XML CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions/*.xml")
+set(LOGMSG_JSON
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions/Copter_LogMessages.json.xz"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions/Plane_LogMessages.json.xz"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions/Copter_LegacyDescriptions.json"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions/Plane_LegacyDescriptions.json")
 set(GEN_LOGMSG_HDR_OUT "${CMAKE_CURRENT_BINARY_DIR}/LogMessageDescriptions.h")
 add_custom_command(OUTPUT "${GEN_LOGMSG_HDR_OUT}"
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/scripts/generate_LogMessageDescriptions_header.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/LogMessageDescriptions" "${GEN_LOGMSG_HDR_OUT}"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/scripts/generate_LogMessageDescriptions_header.py" ${LOGMSG_XML}
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/DataLoadAPBin/scripts/generate_LogMessageDescriptions_header.py" ${LOGMSG_JSON}
     COMMENT "Embedding ArduPilot log message descriptions"
     VERBATIM)
 

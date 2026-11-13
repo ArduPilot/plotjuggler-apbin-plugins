@@ -1,0 +1,176 @@
+{
+  "source": "Descriptions and enum entries retained from the previous bundled XML for older logs",
+  "logformats": [
+    {
+      "name": "GPS",
+      "fields": [
+        {
+          "name": "Status",
+          "units": "",
+          "type": "uint8_t",
+          "enum": {
+            "name": "AP_GPS::GPS_Status",
+            "entries": [
+              {
+                "name": "NO_FIX",
+                "value": 1,
+                "description": "Receiving valid GPS messages but no lock"
+              },
+              {
+                "name": "GPS_OK_FIX_2D",
+                "value": 2,
+                "description": "Receiving valid messages and 2D lock"
+              },
+              {
+                "name": "GPS_OK_FIX_3D",
+                "value": 3,
+                "description": "Receiving valid messages and 3D lock"
+              },
+              {
+                "name": "GPS_OK_FIX_3D_DGPS",
+                "value": 4,
+                "description": "Receiving valid messages and 3D lock with differential improvements"
+              },
+              {
+                "name": "GPS_OK_FIX_3D_RTK_FLOAT",
+                "value": 5,
+                "description": "Receiving valid messages and 3D RTK Float"
+              },
+              {
+                "name": "GPS_OK_FIX_3D_RTK_FIXED",
+                "value": 6,
+                "description": "Receiving valid messages and 3D RTK Fixed"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "HRSC",
+      "fields": [
+        {
+          "name": "Stat",
+          "units": "",
+          "type": "uint8_t",
+          "description": "RSC state"
+        }
+      ]
+    },
+    {
+      "name": "LDET",
+      "fields": [
+        {
+          "name": "Flags",
+          "units": "",
+          "type": "uint16_t",
+          "bitmask": {
+            "name": "Copter::LandDetectorLoggingFlag",
+            "entries": [
+              {
+                "name": "LARGE_ANGLE_REQUEST",
+                "value": 256
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "RFRN",
+      "fields": [
+        {
+          "name": "Flags",
+          "units": "",
+          "type": "uint8_t",
+          "bitmask": {
+            "name": "AP_DAL::RFRNFlags",
+            "entries": [
+              {
+                "name": "AHRS_AIRSPEED_SENSOR_ENABLED",
+                "value": 8
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "RTC",
+      "fields": [
+        {
+          "name": "old_utc",
+          "units": "μs",
+          "type": "uint64_t",
+          "description": "old time"
+        },
+        {
+          "name": "new_utc",
+          "units": "μs",
+          "type": "uint64_t",
+          "description": "new time"
+        }
+      ]
+    },
+    {
+      "name": "SBLM",
+      "fields": [
+        {
+          "name": "TimeUS",
+          "units": "",
+          "type": "uint64_t",
+          "description": "Time since system startup"
+        },
+        {
+          "name": "RAx",
+          "units": "",
+          "type": "float",
+          "description": "acceleration around X axis"
+        },
+        {
+          "name": "RAy",
+          "units": "",
+          "type": "float",
+          "description": "acceleration around Y axis"
+        },
+        {
+          "name": "RAz",
+          "units": "",
+          "type": "float",
+          "description": "acceleration around Z axis"
+        }
+      ],
+      "description": "Simulated Blimp Rotational Accelerations"
+    },
+    {
+      "name": "VER",
+      "fields": [
+        {
+          "name": "BST",
+          "units": "",
+          "type": "uint16_t",
+          "enum": {
+            "name": "HAL_BOARD_SUBTYPE",
+            "entries": [
+              {
+                "name": "HAL_BOARD_SUBTYPE_LINUX_AERO",
+                "value": 1015
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "XKF5",
+      "fields": [
+        {
+          "name": "offset",
+          "units": "UNKNOWN",
+          "type": "int16_t * 100",
+          "description": "Estimated vertical position of the terrain relative to the nav filter zero datum"
+        }
+      ]
+    }
+  ]
+}

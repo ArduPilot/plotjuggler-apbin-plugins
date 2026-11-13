@@ -17,4 +17,6 @@ if(TARGET DataAPBin)
     endif()
     add_test(NAME apbin_load_and_lifecycle
         COMMAND pj_plugin_smoketest $<TARGET_FILE:DataAPBin> "${CMAKE_CURRENT_SOURCE_DIR}/logs/00000001.BIN" ${_verify})
+    add_test(NAME apbin_metadata_generator
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_metadata_generator.py")
 endif()
