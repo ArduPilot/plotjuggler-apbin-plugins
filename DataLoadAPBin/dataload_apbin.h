@@ -13,9 +13,8 @@
 
 #pragma once
 
-#include <QObject>
-#include <QtPlugin>
-#include "PlotJuggler/dataloader_base.h"
+#include <QString>
+#include <pj_base/sdk/data_source_patterns.hpp>
 #include "logformat.h"
 #include <map>
 #include <string>
@@ -24,29 +23,17 @@
 
 using namespace PJ;
 
-class DataLoadAPBIN : public DataLoader
+class DataLoadAPBIN : public PJ::FileSourceBase
 {
-  Q_OBJECT
-  Q_PLUGIN_METADATA(IID "facontidavide.PlotJuggler3.DataLoader")
-  Q_INTERFACES(PJ::DataLoader)
-
 public:
-  DataLoadAPBIN();
-  virtual const std::vector<const char*>& compatibleFileExtensions() const override;
-
-  bool readDataFromFile(PJ::FileLoadInfo* fileload_info, PlotDataMapRef& destination) override;
-
+  uint64_t extraCapabilities() const override { return PJ::kCapabilityDirectIngest; }
+  std::string saveConfig() const override;
+  PJ::Status loadConfig(std::string_view config_json) override;
+  PJ::Status importData() override;
   ~DataLoadAPBIN() override = default;
 
-  virtual const char* name() const override
-  {
-    return "ArduPilot Bin";
-  }
-
-protected:
-
 private:
-  std::vector<const char*> extensions;
+  QString _filepath;
 
 
   // message_data holds the data of a message for each timestamp

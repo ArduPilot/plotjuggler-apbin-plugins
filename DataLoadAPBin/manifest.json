@@ -1,0 +1,9 @@
+{
+  "id": "ardupilot-bin",
+  "name": "ArduPilot Bin",
+  "version": "0.2.0",
+  "description": "Load ArduPilot DataFlash binary logs",
+  "min_plotjuggler_version": "4.1.0",
+  "min_sdk_required": "0.40.0",
+  "file_extensions": [".bin"]
+}

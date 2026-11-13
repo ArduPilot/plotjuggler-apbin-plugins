@@ -1,0 +1,7 @@
+.git
+.venv
+build
+tests/build
+artifacts
+plugin_install
+CMakeUserPresets.json

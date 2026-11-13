@@ -33,3 +33,5 @@
 /CMakeLists.txt.user
 build/*
 tests/build/
+.venv/
+CMakeUserPresets.json

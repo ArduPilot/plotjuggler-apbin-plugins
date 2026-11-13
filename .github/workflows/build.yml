@@ -1,5 +1,4 @@
-name: Build plugin
-
+name: Build PlotJuggler 4 plugin
 on:
   push:
     branches: [main]
@@ -8,21 +7,17 @@ on:
   workflow_dispatch:
 
 env:
-  # Single source of truth: both the clone and the cache key derive from this.
-  PJ_TAG: '3.9.2'
+  # Export and restore Conan archives with the same tested Conan version.
+  CONAN_VERSION: '2.34.0'
 
 jobs:
-  # Build PlotJuggler once per platform and cache the install tree. Hoisted out of
-  # the plugin matrix so it is not rebuilt once per build configuration.
-  plotjuggler:
-    name: PlotJuggler (${{ matrix.platform.label }})
+  # Prepare the SDK once per platform and share its Conan packages. Hoisted out
+  # of the plugin matrix so dependencies are not rebuilt for each label variant.
+  sdk:
+    name: PlotJuggler SDK (${{ matrix.platform.label }})
     runs-on: ${{ matrix.platform.os }}
     container:
-      # Ubuntu is built inside a 22.04 container rather than on a 24.04 runner so
-      # the artifacts keep the older libstdc++/glibc floor: a binary built against
-      # GCC 13 needs GLIBCXX_3.4.32 and will not load on Ubuntu 22.04, while a
-      # 22.04 build loads on both. This also matches the Dockerfile exactly, so a
-      # CI failure reproduces locally with `docker build`.
+      # Keep the SDK and plugin on the same Ubuntu 22.04 libstdc++/glibc floor.
       image: ${{ matrix.platform.container || '' }}
     strategy:
       fail-fast: false
@@ -30,176 +25,149 @@ jobs:
         platform:
           - { os: ubuntu-latest, container: 'ubuntu:22.04', label: ubuntu-22.04 }
           - { os: windows-2022, label: windows-2022 }
-
     steps:
-      # GITHUB_WORKSPACE is backslash-separated on Windows; normalise it so a
-      # single bash step can hand the path to cmake on every platform.
-      - name: Resolve install prefix
-        shell: bash
-        run: echo "PJ_INSTALL=${GITHUB_WORKSPACE//\\//}/pj_install" >> "$GITHUB_ENV"
-
-      # The label is part of the key because runner.os alone cannot tell a 22.04
-      # container build from a build on the runner's own newer userland.
-      - name: Cache PlotJuggler install
-        id: cache
-        uses: actions/cache@v6
-        with:
-          path: pj_install
-          key: ${{ matrix.platform.label }}-plotjuggler-${{ env.PJ_TAG }}
-
-      - name: Install PlotJuggler dependencies
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Linux'
-        # No sudo: the container runs as root. python3 matters -- CMakeLists falls
-        # back to an empty LogMessageDescriptions.h without it, silently dropping
-        # the field tooltips from the built plugin.
+      - name: Install Linux SDK build tools
+        if: runner.os == 'Linux'
+        # Install git before checkout; the container runs as root.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake git ca-certificates python3 zstd \
-            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
-            libqt5x11extras5-dev libprotoc-dev libzmq3-dev liblz4-dev libzstd-dev
-
-      - name: Install Qt
-        if: steps.cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        uses: jurplel/install-qt-action@v4
+            build-essential cmake git ca-certificates python3 python3-venv zstd
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Windows'
         with:
-          version: '5.15.2'
-          arch: 'win64_msvc2019_64'
-
-      - name: Clone PlotJuggler
-        if: steps.cache.outputs.cache-hit != 'true'
+          python-version: '3.11'
+      - name: Set up Conan and detect compiler profile
         shell: bash
-        run: git clone --depth 1 --branch "$PJ_TAG" https://github.com/facontidavide/PlotJuggler.git plotjuggler
-
-      - name: Configure PlotJuggler
-        if: steps.cache.outputs.cache-hit != 'true'
-        shell: bash
-        # CMAKE_POLICY_VERSION_MINIMUM is insurance: PlotJuggler 3.9.2 ships
-        # third-party directories declaring cmake_minimum_required(VERSION 3.0),
-        # which CMake 4 rejects outright. Ignored by CMake older than 3.31.
         run: |
-          cmake -S plotjuggler -B pj_build \
-            -DCMAKE_INSTALL_PREFIX="$PJ_INSTALL" \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-
-      - name: Build & install PlotJuggler
-        if: steps.cache.outputs.cache-hit != 'true'
+          export CONAN_HOME="${RUNNER_TEMP//\\//}/conan-home"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python3 -m venv "$RUNNER_TEMP/conan-env"
+            source "$RUNNER_TEMP/conan-env/bin/activate"
+          fi
+          python -m pip install "conan==${CONAN_VERSION}"
+          conan profile detect
+          mkdir -p sdk-cache
+          # Conan returns a Windows path on Windows; normalise it for Bash.
+          profile="$(conan profile path default)"
+          cp "${profile//\\//}" sdk-cache/default.profile
+      - name: Cache SDK Conan packages
+        id: sdk-cache
+        uses: actions/cache@v6
+        with:
+          path: sdk-cache
+          # Include the compiler profile, ABI platform, dependency pins and
+          # archive version. Label options do not affect the SDK packages.
+          key: sdk-v1-${{ matrix.platform.label }}-conan-${{ env.CONAN_VERSION }}-Release-cpp20-${{ hashFiles('conanfile.txt', 'sdk-cache/default.profile') }}
+      - name: Prepare pinned SDK and export Conan packages
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
         shell: bash
-        run: cmake --build pj_build --config RelWithDebInfo --target install --parallel "$(nproc || echo 2)"
+        run: |
+          export CONAN_HOME="${RUNNER_TEMP//\\//}/conan-home"
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            source "$RUNNER_TEMP/conan-env/bin/activate"
+          fi
+          conan remote add plotjuggler https://plotjuggler.jfrog.io/artifactory/api/conan/plotjuggler-conan
+          conan install . -of sdk-build --build=missing -s build_type=Release \
+            -s compiler.cppstd=20 --lockfile-out=sdk-cache/conan.lock
+          # Save packages portably, rather than copying Conan's path-dependent
+          # cache database. The isolated Conan home contains only this SDK graph.
+          conan cache save '*:*' --no-source --file=sdk-cache/conan-packages.tgz
+      - name: Share SDK packages with plugin jobs
+        uses: actions/upload-artifact@v7
+        with:
+          name: ConanSDK-${{ matrix.platform.label }}
+          path: sdk-cache/
+          if-no-files-found: error
 
   plugin:
     name: ${{ matrix.config.name }} (${{ matrix.platform.label }})
-    needs: plotjuggler
+    needs: sdk
     runs-on: ${{ matrix.platform.os }}
     container:
       image: ${{ matrix.platform.container || '' }}
     strategy:
-      # Never let one configuration mask the others.
       fail-fast: false
       matrix:
+        # Use a supported host runner while keeping the Ubuntu 22.04 container's
+        # libstdc++/glibc floor. This also matches the default Docker base image.
         platform:
           - { os: ubuntu-latest, container: 'ubuntu:22.04', label: ubuntu-22.04 }
           - { os: windows-2022, label: windows-2022 }
         config:
-          - name: units
-            units: 'ON'
-            rcou: 'OFF'
-          - name: units-rcou
-            units: 'ON'
-            rcou: 'ON'
-          - name: plain
-            units: 'OFF'
-            rcou: 'OFF'
-
+          - { name: plain, units: 'OFF', rcou: 'OFF' }
+          - { name: units, units: 'ON', rcou: 'OFF' }
+          - { name: rcou, units: 'OFF', rcou: 'ON' }
+          - { name: units-rcou, units: 'ON', rcou: 'ON' }
     steps:
-      # Before checkout, so that actions/checkout finds git and makes a real clone
-      # instead of falling back to a source tarball.
-      - name: Install plugin dependencies
+      - name: Install Linux build tools
         if: runner.os == 'Linux'
+        # Install git before checkout so it creates a clone rather than falling
+        # back to an archive. The container runs as root, so sudo is unnecessary.
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake git ca-certificates python3 zstd \
-            qtbase5-dev libqt5svg5-dev libqt5websockets5-dev libqt5opengl5-dev \
-            libqt5x11extras5-dev
-
-      - name: Checkout plugin
-        uses: actions/checkout@v7
-
-      - name: Resolve install prefix
-        shell: bash
-        run: echo "PJ_INSTALL=${GITHUB_WORKSPACE//\\//}/pj_install" >> "$GITHUB_ENV"
-
-      # The plotjuggler job has already populated this key, so a miss means
-      # something is wrong and should fail loudly rather than rebuild silently.
-      - name: Restore PlotJuggler install
-        uses: actions/cache/restore@v6
-        with:
-          path: pj_install
-          key: ${{ matrix.platform.label }}-plotjuggler-${{ env.PJ_TAG }}
-          fail-on-cache-miss: true
-
-      - name: Install Qt
+            build-essential cmake git ca-certificates python3 python3-venv qt6-base-dev
+      - uses: actions/checkout@v7
+      - name: Install Windows Qt 6
         if: runner.os == 'Windows'
         uses: jurplel/install-qt-action@v4
         with:
-          version: '5.15.2'
-          arch: 'win64_msvc2019_64'
-
-      - name: Configure plugin
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+      - uses: actions/setup-python@v6
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.11'
+      - name: Download prepared SDK packages
+        uses: actions/download-artifact@v8
+        with:
+          name: ConanSDK-${{ matrix.platform.label }}
+          path: sdk-cache
+      - name: Restore SDK packages and generate plugin toolchain
         shell: bash
         run: |
-          cmake -S . -B build \
-            -Dplotjuggler_DIR="$PJ_INSTALL/lib/cmake/plotjuggler" \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DADD_UNITS=${{ matrix.config.units }} \
+          export CONAN_HOME="${RUNNER_TEMP//\\//}/conan-home"
+          # Keep Linux Python isolated from system packages, as in Docker.
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            python3 -m venv "$RUNNER_TEMP/conan-env"
+            source "$RUNNER_TEMP/conan-env/bin/activate"
+          fi
+          python -m pip install "conan==${CONAN_VERSION}"
+          conan cache restore sdk-cache/conan-packages.tgz
+          # Use the producer's profile and revisions. Missing packages fail
+          # instead of silently downloading or rebuilding the SDK per variant.
+          conan install . -of build --build=never --no-remote \
+            -pr:h sdk-cache/default.profile -pr:b sdk-cache/default.profile \
+            -s build_type=Release -s compiler.cppstd=20 --lockfile=sdk-cache/conan.lock
+      - name: Configure and build
+        shell: bash
+        run: |
+          cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake \
+            -DCMAKE_BUILD_TYPE=Release -DADD_UNITS=${{ matrix.config.units }} \
             -DADD_RCOU_FUNCTION_LABELS=${{ matrix.config.rcou }}
-
-      - name: Build plugin
-        shell: bash
-        run: cmake --build build --config Release --parallel "$(nproc || echo 2)"
-
-      - name: Install plugin
-        shell: bash
-        run: cmake --install build --prefix plugin_install --config Release
-
-      - name: Build smoke test
+          cmake --build build --config Release --parallel 2
+      - name: Test plugin and install
+        # Check both build and installed binaries so install-time library paths
+        # are exercised. Verify every label combination, including plain.
         shell: bash
         run: |
-          cmake -S tests -B tests/build \
-            -DPJ_INCLUDE_DIR="$PJ_INSTALL/include" \
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build tests/build --config Release --parallel "$(nproc || echo 2)"
-
-      # Loads the plugin exactly as PlotJuggler does and parses a real log, so a
-      # plugin that builds but cannot be loaded fails here instead of in a user's
-      # hands. The --expect-* flags additionally assert that this job's CMake
-      # options actually reached the binary, which a build log cannot tell you.
-      # offscreen because CI has no display.
-      - name: Smoke test plugin
-        shell: bash
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: |
-          if [ -x tests/build/pj_plugin_smoketest ]; then
-            smoketest=tests/build/pj_plugin_smoketest
-          else
-            smoketest=tests/build/Release/pj_plugin_smoketest.exe
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error
+          cmake --install build --prefix plugin_install --config Release
+          smoketest=build/tests/pj_plugin_smoketest
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            smoketest=build/tests/Release/pj_plugin_smoketest.exe
           fi
           plugin="$(find plugin_install -type f \( -name '*.so' -o -name '*.dll' \) -print -quit)"
-          # --verify is unconditional so that the all-OFF 'plain' configuration is
-          # asserted too, not merely reported.
+          if [ -z "$plugin" ]; then
+            echo "No installed plugin library found" >&2
+            exit 1
+          fi
           expect=(--verify)
-          if [ "${{ matrix.config.units }}" = "ON" ]; then
-            expect+=(--expect-units)
-          fi
-          if [ "${{ matrix.config.rcou }}" = "ON" ]; then
-            expect+=(--expect-rcou)
-          fi
-          echo "Testing $plugin ${expect[*]}"
+          if [ "${{ matrix.config.units }}" = "ON" ]; then expect+=(--expect-units); fi
+          if [ "${{ matrix.config.rcou }}" = "ON" ]; then expect+=(--expect-rcou); fi
           "$smoketest" "$plugin" tests/logs/00000001.BIN "${expect[@]}"
-
       - name: Upload plugin artifact
         uses: actions/upload-artifact@v7
         with:
@@ -222,9 +190,11 @@ jobs:
       - name: Download all plugin artifacts
         uses: actions/download-artifact@v8
         with:
+          # SDK transfer artifacts contain dependencies, not release plugins.
+          pattern: DataAPBin-*
           path: artifacts
 
-      # Each artifact holds a single shared library under bin/. Flatten them
+      # Each artifact holds a single shared library under lib/. Flatten them
       # into uniquely named assets, keeping the real extension so a downloaded
       # asset is still recognisable as a plugin.
       - name: Collect release assets

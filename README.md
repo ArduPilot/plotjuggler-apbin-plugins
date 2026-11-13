@@ -1,143 +1,212 @@
 # plotjuggler-apbin-plugins
 
-This repository contains the [ArduPilot Dataflash](https://ardupilot.org/copter/docs/common-logs.html) plugin for [PlotJuggler](https://github.com/facontidavide/PlotJuggler).
+ArduPilot [DataFlash binary log](https://ardupilot.org/copter/docs/common-logs.html)
+loader for [PlotJuggler 4](https://github.com/PlotJuggler/PlotJuggler).
+Plugin version **0.2.0** targets PlotJuggler **4.1.0** and its **plotjuggler_sdk 0.40.0**.
+It uses the SDK's C ABI data-source interface, C++20, and Qt 6 Core.
+PlotJuggler 3 / Qt 5 binaries are incompatible with this version.
 
-## Install PlotJuggler
+## Get the plugin and PlotJuggler
 
-To build any plugin for PlotJuggler, PlotJuggler must be installed on your system.
-For detailed instructions on how to install PlotJuggler please have a look at the [Installation](https://github.com/facontidavide/PlotJuggler#installation) section of the PlotJuggler repository.
+Clone this repository to build the plugin:
 
-If you have ROS installed, you can install PlotJuggler using:
-
-    sudo apt install ros-$ROS_DISTRO-plotjuggler-ros
-
-## (Optional) Build plotjuggler-apbin-plugin
-
-If you wish to build `plotjuggler-apbin-plugin` follow these steps.
-
-### 1. Clone the repository
-
-```
+```sh
 git clone https://github.com/ArduPilot/plotjuggler-apbin-plugins
+cd plotjuggler-apbin-plugins
 ```
 
-### 2a. Compile via Docker
+Prebuilt Ubuntu and Windows plugins are available on the
+[GitHub Releases](https://github.com/ArduPilot/plotjuggler-apbin-plugins/releases)
+page. Choose a release built for PlotJuggler 4; older PlotJuggler 3 plugins
+cannot be used with the current application.
 
-This requires that you have Docker installed in your system.
+To run the plugin, install a compatible PlotJuggler application using its
+[installation instructions](https://github.com/PlotJuggler/PlotJuggler#installation).
+The application is not required to compile the plugin.
 
-1. `cd` into the cloned repository.
+## Build
 
-2. Prepare a new folder with
-    ```bash
-    mkdir artifacts
-    ```
+Install a C++20 compiler, CMake 3.22+, Python 3, Conan 2, and Qt 6 development
+files. Use a Qt 6 kit compatible with the application: the target PlotJuggler checkout
+pins Qt 6.12.0. On Windows use the same architecture and MSVC runtime as the app.
+The SDK is Qt independent; the plugin only uses Qt Core and creates no widgets.
+You do not need to build or install the PlotJuggler application to build this plugin.
 
-3. Build the plugin with
-    ```bash
-    docker build -o type=local,dest=artifacts .
-    ```
-    This command will clone and build PlotJuggler anew, which takes a lot of time.
+On Ubuntu, install `build-essential cmake qt6-base-dev python3 python3-venv`.
+Then, from this repository:
 
-    You can pass build arguments with the `--build-arg` option.
-    Build arguments include:
-    - `ADD_UNITS[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
-    - `ADD_RCOU_FUNCTION_LABELS[=OFF]`: Set to `ON` to enable the display the channel function next to its name.
-[=OFF]`: Set to `ON` to enable the display of units in the logged fields. Read at the end for more information.
-    - `BASE_IMAGE[=ubuntu:22.04]`: Specify the OS image to build off of. It is known that using a different OS than your host OS may result in the plugin not working.
-    - `PJ_TAG[=3.9.2]`: The PlotJuggler git branch or tag to use when cloing and compiling PlotJuggler.
-
-Once compilation is finished, you will find your `.so` plugin in the `artifacts` folder you created previously.
-
-### 2b. Compile locally
-
-1. Clone and compile PlotJuggler [following the instructions](https://github.com/facontidavide/PlotJuggler/blob/main/COMPILE.md).
-    Make a note of the workspace folder you created (where the `src`, `build` and `install` folders live).
-1. Install the dependencies:  
-    The plugin uses Qt as dependency.
-    Since PlotJuggler also depends on Qt, chances are high that you already have it installed.
-    On Ubuntu Qt can be installed with:
-
-    ```bash
-    sudo apt -y install qtbase5-dev libqt5svg5-dev
-    ```
-
-2. The optional features are selected with cmake options, both `OFF` by default:
-    - `-DADD_UNITS=ON` displays the units of the logged fields (read at the end).
-    - `-DADD_RCOU_FUNCTION_LABELS=ON` displays the channel function next to its name.
-
-3. Compile using cmake:
-
-    ```bash
-    export PJ_WS=<absolute_path_to_plotjugger_workspace>
-    export LIBRARY_PATH="$LIBRARY_PATH:$PJ_WS/install/lib"
-    mkdir build; cd build
-    cmake -DCMAKE_PREFIX_PATH="$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
-    make
-    sudo make install
-    ```
-
-### Testing a built plugin
-
-`tests/` holds a headless check that loads a plugin the way PlotJuggler does and
-parses the small log in `tests/logs/`, without starting the GUI.
-It also verifies that the cmake options above actually reached the binary, and on
-Linux reports whether the plugin's libstdc++ requirement is satisfied by your
-system — which is what catches a plugin built on a newer distro than the one
-running it.
-
-```bash
-cmake -S tests -B tests/build -DPJ_INCLUDE_DIR="$PJ_WS/install/include"
-cmake --build tests/build
-./tests/test_plugin.sh build/libDataAPBin.so
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install 'conan>=2,<3'
+conan profile detect  # once, if no default profile exists
+conan remote add plotjuggler https://plotjuggler.jfrog.io/artifactory/api/conan/plotjuggler-conan
+conan install . -of build --build=missing -s build_type=Release -s compiler.cppstd=20
+cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=build/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --prefix plugin_install
 ```
 
-Point it at a plugin downloaded from CI or a release to check it before use.
+Pass `-DCMAKE_PREFIX_PATH=<Qt6-kit>` if Qt is not found. On Windows run in a
+Visual Studio developer shell, create the environment with `python -m venv .venv`,
+and activate it with `.venv\Scripts\Activate.ps1` in PowerShell or
+`.venv\Scripts\activate.bat` in cmd. Continue from the pip installation step,
+using `python` instead of `python3`. The virtual environment also works on Ubuntu
+24.04 and other distributions that prevent pip from changing system Python.
+An existing installed SDK can also be used directly with
+`-Dplotjuggler_sdk_DIR=<sdk>/lib/cmake/plotjuggler_sdk`, without Conan.
 
-### Notes for building on MacOS
+### Build against SDK sources
 
-Qt dependencies may not be found automatically.
-If you run into issues, try this `cmake` command instead:
+`-DPJ_SDK_SOURCE_DIR=<plotjuggler_sdk-0.40.0-checkout>` builds the SDK in-tree.
+Its CMake dependencies (`fmt`, `FastFloat`, `nlohmann_json`) must be installed
+or supplied through `CMAKE_PREFIX_PATH`. The SDK's own tests and ported plugins
+are disabled; this plugin's tests remain enabled. This is useful when validating
+against the SDK release pinned in PlotJuggler's `conanfile.txt`.
 
-```bash
-cmake -DCMAKE_PREFIX_PATH="/opt/homebrew/opt/qt@5;$PJ_WS/install/lib/cmake/plotjuggler" -DCMAKE_LIBRARY_PATH="$PJ_WS/install/lib;$PJ_WS/build/PlotJuggler" ..
+### Build in a ROS workspace
+
+ROS 1 catkin and ROS 2 ament integration are retained. Source your ROS environment
+and place the plugin repository under the workspace's `src/` directory. Install
+Qt 6 and SDK 0.40.0 first; the plugin no longer links against the PlotJuggler
+application. For an installed SDK, build from the workspace root.
+
+Use the system Python that provides your ROS modules. The commands below use
+`/usr/bin/python3` on Ubuntu and explicitly select it for CMake, including when
+Conan's virtual environment is still active.
+Build with:
+
+```sh
+# ROS 1, using catkin_tools
+catkin build plotjuggler_apbin_plugins --cmake-args \
+  -Dplotjuggler_sdk_DIR=/absolute/path/to/sdk/lib/cmake/plotjuggler_sdk \
+  -DPYTHON_EXECUTABLE=/usr/bin/python3 -DPython3_EXECUTABLE=/usr/bin/python3
+
+# ROS 2
+colcon build --packages-select plotjuggler_apbin_plugins --cmake-args \
+  -Dplotjuggler_sdk_DIR=/absolute/path/to/sdk/lib/cmake/plotjuggler_sdk \
+  -DPython3_EXECUTABLE=/usr/bin/python3
 ```
 
-If using this plugin with the new official PlotJuggler .dmg releases, you may run into signing and security issues.
-This command allows running a custom plugin on a signed version of PlotJuggler:
+Alternatively, run the Conan setup above through `conan install` in the plugin
+repository, then pass the absolute path to `build/conan_toolchain.cmake` with
+`-DCMAKE_TOOLCHAIN_FILE=...`
+in the workspace command's `--cmake-args`, replacing `-Dplotjuggler_sdk_DIR=...`
+and retaining the Python options above. This keeps ROS's `catkin_pkg` and
+`ament_package` modules visible; Conan's isolated Python does not include them.
+You can also run `deactivate` before the workspace build. If a package was
+already configured with the virtual environment's Python, retain the explicit
+Python options to replace the cached interpreter paths.
 
-```bash
-sudo codesign --force --deep --sign - /Applications/PlotJuggler.app
+Add `-DCMAKE_PREFIX_PATH=<Qt6-kit>` if needed. The runtime dependency requires
+PlotJuggler 4.1.0 or newer; a ROS
+distribution's PlotJuggler 3 package is incompatible.
+
+Both ROS install trees place the plugin and its manifest under
+`lib/plotjuggler_apbin_plugins`. Add that directory to PlotJuggler's plugin folders
+as described below. The catkin devel tree places the shared library under `lib`.
+
+### Notes for building on macOS
+
+Qt dependencies may not be found automatically. With Homebrew Qt 6, pass
+`-DCMAKE_PREFIX_PATH="$(brew --prefix qt)"` to CMake; also include the installed
+SDK prefix if you are building without Conan. The current official PlotJuggler
+app bundle permits third-party plugin libraries, so the old workaround that
+re-signed the application is no longer needed.
+
+### Optional labels
+
+Both options default to `OFF`:
+
+* `-DADD_UNITS=ON` appends units to field names.
+* `-DADD_RCOU_FUNCTION_LABELS=ON` appends servo functions to RCOU/RCO2 channel names.
+
+Build and run CTest for each configuration you use. **Be careful:** changing
+either option changes series names. A saved layout created without units or servo
+labels cannot resolve those series after enabling the corresponding option, and
+vice versa. Use the same label configuration when opening a saved layout.
+
+### Docker
+
+```sh
+mkdir -p artifacts
+docker build --output type=local,dest=artifacts .
 ```
 
-This likely adds your signature to the app so your plugin and the official .dmg now share a common signature.
+Build arguments: `BASE_IMAGE` (default `ubuntu:22.04`), `ADD_UNITS`, and
+`ADD_RCOU_FUNCTION_LABELS` (both default `OFF`). The image builds the SDK through
+Conan and tests the plugin; it does not compile the PlotJuggler GUI.
+Pass an argument with `--build-arg`, for example `--build-arg ADD_UNITS=ON`.
+The exported `libDataAPBin.so` and `DataAPBin.pjmanifest.json` are placed in
+`artifacts/`; copy them to a PlotJuggler plugin folder.
 
-## Install plotjuggler-apbin-plugin
+Choose a base image whose libstdc++ and glibc requirements are supported by the
+host running PlotJuggler. A plugin built on a newer distribution may fail to
+load on an older one. The default Ubuntu 22.04 base preserves compatibility with
+22.04 and newer hosts; `tests/test_plugin.sh` reports the binary's ABI floor.
 
-PlotJuggler looks for plugins in specific folders.
-Check **App->Preferences->Plugins** in PlotJuggler to find out which they are and add more if you wish to.
+## Install and load logs
 
-If you have added a folder, you will need to restart PlotJuggler for the change to take effect.
+The standalone install tree contains `lib/libDataAPBin.so` on Linux,
+`lib/DataAPBin.dll` on Windows, or `lib/libDataAPBin.dylib` on macOS, plus the
+SDK-generated `DataAPBin.pjmanifest.json` sidecar in the same directory.
+Check **App -> Preferences -> Plugins** to find the default plugin folders or add
+a custom folder. Copy the binary and sidecar there, then restart PlotJuggler so
+it scans the folder. This also applies when adding a folder in Preferences.
 
-### For prebuilt binaries
+You can instead launch the PlotJuggler executable with `--plugin-dir <folder>`.
+For a source build, use the launch scripts **from the PlotJuggler repository**:
 
-You can find a pre-built plugin for Ubuntu and Windows in the [Github Releases](https://github.com/ArduPilot/plotjuggler-apbin-plugins/releases) page.
-Copy that binary to one of the PlotJuggler plugin folders.
+```sh
+/absolute/path/to/PlotJuggler/run.sh --plugin-dir /absolute/path/to/plugin_install/lib
+```
 
-### For Docker-built binaries
+On Windows use `C:\path\to\PlotJuggler\run.bat --plugin-dir <folder>`.
+Open an ArduPilot `.bin` or `.BIN`
+file with the **ArduPilot Bin** data source. The host passes its path through the
+SDK's `filepath` configuration property.
 
-If you used Docker to compile the plugin, copy the build artifact from the `artifacts` folder to one of the PlotJuggler plugin folders.
+The loader preserves message/instance/field paths, multipliers, GPS time
+synchronization, parameter defaults, and message text. Timestamps passed to the
+SDK are nanoseconds. When GPS time is unavailable, TimeUS uses seconds since boot,
+including older logs without FMTU. Every import resets the decoding state.
 
-### For locally-built binaries
+The message timeline is now `/2. Message Timeline/index`, since PlotJuggler 4
+represents scalar series as a topic plus field. The SDK's scalar write API has
+no per-field tooltip setter; XML descriptions are retained in dataset metadata
+under `field_descriptions`, available in the metadata inspector.
 
-If you compiled the plugin in your host system, the plugin has been installed to `/usr/local/bin/`.  
+## Test a downloaded or locally built binary
 
-Ensure that PlotJuggler scans for plugins in this folder or copy the plugin in one of the folders PlotJuggler already scans.
+The headless helper loads the binary through the same SDK library loader as
+PlotJuggler 4 and binds recording write/runtime services. It verifies the real
+log in `tests/logs`, repeated imports, parameter/message-only logs, old and new
+MSG layouts, timestamp units, configuration roundtrips, cancellation, and
+file/host failures.
 
-## Displaying units
+```sh
+build/tests/pj_plugin_smoketest build/libDataAPBin.so tests/logs/00000001.BIN --verify
+```
 
-This plugin allows the units of logged fields to be appended to the logged field names.
+Use `--expect-units` and/or `--expect-rcou` together with `--verify` for enabled
+label options. On Windows the DLL is under `build/Release` and the helper is
+under `build/tests/Release` when using a multi-configuration generator.
 
-**Be careful:**
+To build the helper independently, for example to test a downloaded plugin:
 
-If you created a PlotJuggler layout without units and then enable the units, the layout will be unusable and vice-versa.
-This is because the units are part of the field name; hence, the original field name no longer exists.
+```sh
+cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=<installed-sdk-and-Qt6> -DCMAKE_BUILD_TYPE=Release
+cmake --build tests/build --config Release --parallel
+```
+
+With a multi-configuration Windows generator, this helper is under
+`tests/build/Release`.
+
+On Linux, `tests/test_plugin.sh <plugin> [log]` uses this independent helper and
+also reports the libstdc++ ABI floor. To use the helper from the main build,
+select its path explicitly:
+
+```sh
+SMOKETEST=build/tests/pj_plugin_smoketest tests/test_plugin.sh build/libDataAPBin.so --verify
+```

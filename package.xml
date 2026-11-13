@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="3">
     <name>plotjuggler_apbin_plugins</name>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
     <description>PlotJuggler ArduPilot Bin plugins</description>
 
     <maintainer email="pierre.kancir.emn@gmail.com">Pierre KANCIR</maintainer>
@@ -14,7 +14,8 @@
     <buildtool_depend condition="$ROS_VERSION == 1">catkin</buildtool_depend>
     <buildtool_depend condition="$ROS_VERSION == 2">ament_cmake</buildtool_depend>
 
-    <depend>plotjuggler</depend>
+    <!-- The plugin builds against the standalone SDK; PlotJuggler is needed at runtime. -->
+    <exec_depend version_gte="4.1.0">plotjuggler</exec_depend>
 
     <!-- The export tag contains other, unspecified, tags -->
     <export>
