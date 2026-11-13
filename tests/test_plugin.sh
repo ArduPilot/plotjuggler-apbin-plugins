@@ -7,11 +7,11 @@
 #   1. ABI floor    - which libstdc++/glibc the plugin demands, and whether this
 #                     host can satisfy it. This is what catches "built on a newer
 #                     distro than the user runs". Linux only.
-#   2. Plugin load  - QPluginLoader + cast to PJ::DataLoader, as PlotJuggler does.
-#   3. Parse        - readDataFromFile() on a real ArduPilot .bin.
+#   2. Plugin load  - SDK DataSourceLibrary + C ABI, as PlotJuggler 4 does.
+#   3. Parse        - SDK start() on a real ArduPilot .bin and lifecycle regressions.
 #
 # Build the helper it drives first:
-#   cmake -S tests -B tests/build -DPJ_INCLUDE_DIR=<plotjuggler_install>/include
+#   cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=<installed-sdk-and-Qt6>
 #   cmake --build tests/build
 set -uo pipefail
 
@@ -64,14 +64,12 @@ fi
 echo "=== 2/3. Plugin load and parse ==="
 if [ ! -x "$SMOKETEST" ]; then
   echo "  SKIP: $SMOKETEST not built." >&2
-  echo "        cmake -S $SCRIPT_DIR -B $SCRIPT_DIR/build -DPJ_INCLUDE_DIR=<pj_install>/include" >&2
+  echo "        cmake -S $SCRIPT_DIR -B $SCRIPT_DIR/build -DCMAKE_PREFIX_PATH=<installed-sdk-and-Qt6>" >&2
   echo "        cmake --build $SCRIPT_DIR/build" >&2
   [ "$abi_ok" -eq 1 ] || exit 1
   exit 3
 fi
 
-# offscreen so this runs over SSH and in CI with no display attached
-export QT_QPA_PLATFORM=offscreen
 "$SMOKETEST" "$PLUGIN" "$LOG" "$@"
 result=$?
 

@@ -13,9 +13,8 @@
 
 #pragma once
 
-#include <QObject>
-#include <QtPlugin>
-#include "PlotJuggler/dataloader_base.h"
+#include <QString>
+#include <pj_base/sdk/data_source_patterns.hpp>
 #include "logformat.h"
 #include <map>
 #include <string>
@@ -24,29 +23,17 @@
 
 using namespace PJ;
 
-class DataLoadAPBIN : public DataLoader
+class DataLoadAPBIN : public PJ::FileSourceBase
 {
-  Q_OBJECT
-  Q_PLUGIN_METADATA(IID "facontidavide.PlotJuggler3.DataLoader")
-  Q_INTERFACES(PJ::DataLoader)
-
 public:
-  DataLoadAPBIN();
-  virtual const std::vector<const char*>& compatibleFileExtensions() const override;
-
-  bool readDataFromFile(PJ::FileLoadInfo* fileload_info, PlotDataMapRef& destination) override;
-
+  uint64_t extraCapabilities() const override { return PJ::kCapabilityDirectIngest; }
+  std::string saveConfig() const override;
+  PJ::Status loadConfig(std::string_view config_json) override;
+  PJ::Status importData() override;
   ~DataLoadAPBIN() override = default;
 
-  virtual const char* name() const override
-  {
-    return "ArduPilot Bin";
-  }
-
-protected:
-
 private:
-  std::vector<const char*> extensions;
+  QString _filepath;
 
 
   // message_data holds the data of a message for each timestamp
@@ -110,10 +97,10 @@ private:
   // get unit string for a field
   std::string get_unit(const std::string& msg_name, const std::string& field_name);
 
-  // load human readable descriptions from LogMessages.xml
-  void load_log_messages(const QString& datafile_path);
+  // load human readable descriptions from bundled JSON metadata
+  void load_log_messages();
 
-  // tooltips/descriptions loaded from LogMessages.xml
+  // tooltips/descriptions loaded from ArduPilot log metadata
   std::map<std::string, std::string> _message_tooltips;
   std::map<std::string, std::map<std::string, std::string>> _field_tooltips;
 
